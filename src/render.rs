@@ -519,7 +519,7 @@ mod tests {
         if !Path::new("texturepack").is_dir() {
             return None;
         }
-        Scene::load(2024, &Pack::open(None).ok()?, false).ok()
+        Scene::load(2024, &Pack::open(None).ok()?, false, 0.16).ok()
     }
 
     #[test]

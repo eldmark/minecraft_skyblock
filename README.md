@@ -6,6 +6,11 @@ cero en Rust. **Todo el cómputo corre en CPU**: sin OpenGL, sin shaders, sin GP
 ![Vista general](screenshots/overview.png)
 ![La puerta de cristal](screenshots/gate.png)
 
+Ciclo de día y noche — la misma escena a mediodía y a medianoche:
+
+![Mediodía](screenshots/day.png)
+![Medianoche](screenshots/night.png)
+
 La única dependencia externa es `minifb`, y sirve exclusivamente para mostrar en una
 ventana el buffer que la CPU ya calculó (en Linux hace `XPutImage`, una copia de
 píxeles; no crea contexto 3D). El motor también corre sin ventana con `--render`.
@@ -21,10 +26,15 @@ cargo run --release                              # ventana interactiva
 cargo run --release -- --render out/ -n 240 --samples 8   # órbita a PNGs, sin ventana
 cargo run --release -- --bench 30                # medición de ms/frame
 cargo run --release -- --check-pack              # verifica la carga del texture pack
-cargo test --release                             # 85 pruebas
+cargo test --release                             # 94 pruebas
 ```
 
-Opciones: `--width W --height H --seed N --threads N --samples N --sky-panorama`.
+Opciones: `--width W --height H --seed N --threads N --samples N --sky-panorama
+--time T --cycle`.
+
+`--time T` fija la hora (`0` amanecer, `0.25` mediodía, `0.5` atardecer, `0.75`
+medianoche) y `--cycle` barre un día completo a lo largo de los frames de `--render`,
+que es como se arma el video del ciclo.
 
 ### Controles
 
@@ -32,6 +42,8 @@ Opciones: `--width W --height H --seed N --threads N --samples N --sky-panorama`
 |---|---|
 | Arrastrar mouse, flechas | Orbitar la cámara |
 | Scroll, `W` / `S` | Acercar / alejar |
+| `D` | Arrancar / detener el **ciclo de día y noche** |
+| `,` / `.` | Mover la hora a mano |
 | `R` | Regenerar el terreno con otra semilla |
 | `1`–`4` | Escala de resolución |
 | `P` | Captura de pantalla a PNG |
@@ -64,7 +76,8 @@ El programa lee las texturas directamente del ZIP con su propio DEFLATE.
 | Reflexión | `render.rs` — Fresnel de Schlick; oro, hierro, diamante, agua |
 | Mapas normales | `texture.rs` — derivados por Sobel de la luminancia de cada textura |
 | Material emisivo | glowstone y la puerta, como luces puntuales reales |
-| Skybox | `skybox.rs` — cielo de atardecer procedural (por defecto) o cubemap del panorama |
+| Skybox | `skybox.rs` — cielo procedural que sigue la hora (por defecto) o cubemap del panorama |
+| Ciclo día/noche | `daylight.rs` — sol, luna, paleta del cielo y ambiente desde un solo número; tecla `D` |
 | Paralelismo y optimización | `parallel.rs`, tabla de mediciones abajo |
 
 ## La escena
@@ -97,7 +110,12 @@ Optimizaciones aplicadas, cada una medida a 640×520 con 16 hilos:
 | Descartar linternas cuya contribución es despreciable | 17.12 |
 | Seguir solo la rama dominante tras la primera división | **13.52** |
 
-Reproducible con `--bench N --width W --height H --threads N`.
+El ciclo de día y noche cuesta **~4.5 ms cada vez que rehornea el cielo** (medido con
+`--bench N --cycle`, que fuerza un rehorneado por frame: 18.49 → 23.0 ms). En la
+ventana el cielo solo se rehornea al cruzar uno de los 96 pasos del día, así que con
+un día de 30 s son ~3 rehorneados por segundo: cerca del 1.5% del tiempo de frame.
+
+Reproducible con `--bench N --width W --height H --threads N [--cycle]`.
 
 ## Estructura
 
@@ -116,6 +134,7 @@ src/
   material.rs    parámetros ópticos por material
   assets.rs      bloque → textura por cara → material
   noise.rs       Perlin 2D/3D y fBm
+  daylight.rs    ciclo día/noche: sol, luna, paletas de cielo y ambiente
   terrain.rs     generación procedural de la isla, el montículo y el río
   structures.rs  templo, gran árbol, puente, ruina y las luces
   world.rs       grid de vóxeles + DDA

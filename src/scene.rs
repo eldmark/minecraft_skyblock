@@ -2,19 +2,37 @@
 //! lighting setup, and the animation clock.
 
 use crate::assets::Assets;
-use crate::math::{vec3, Vec3};
+use crate::daylight;
+use crate::math::Vec3;
 use crate::pack::Pack;
 use crate::blocks::{self, Block};
 use crate::noise::Noise;
+use crate::parallel::thread_count;
 use crate::skybox::Skybox;
 use crate::structures;
 use crate::terrain::{self, Island};
 use crate::world::World;
 
+/// How finely the baked sky follows the clock. The sky is re-baked only when the
+/// cycle crosses one of these steps, which keeps a smooth cycle affordable.
+const SKY_STEPS: f32 = 96.0;
+
 pub struct Scene {
     pub island: Island,
     pub assets: Assets,
     pub skybox: Skybox,
+    /// Position in the day/night cycle: 0 sunrise, 0.25 noon, 0.5 sunset,
+    /// 0.75 midnight.
+    pub time_of_day: f32,
+    /// Whether the cycle advances on its own (toggled with `D`).
+    pub cycle_running: bool,
+    /// Seconds one full day takes when the cycle is running.
+    pub cycle_seconds: f32,
+    /// Which sky step is currently baked, so the bake is skipped when it would
+    /// produce the same table.
+    baked_step: i32,
+    /// Threads available for re-baking the sky.
+    threads: usize,
     /// Direction *towards* the sun.
     pub sun_dir: Vec3,
     pub sun_color: Vec3,
@@ -30,28 +48,75 @@ pub struct Scene {
 }
 
 impl Scene {
-    pub fn load(seed: u32, pack: &Pack, panorama_sky: bool) -> Result<Scene, String> {
-        let sun_dir = vec3(0.55, 0.62, 0.36).normalized();
+    pub fn load(seed: u32, pack: &Pack, panorama_sky: bool, time: f32) -> Result<Scene, String> {
+        let threads = thread_count();
         let mut island = terrain::generate(seed);
         structures::place_all(&mut island);
         let lights = structures::collect_lights(&island.world);
+        let light = daylight::at(time);
         Ok(Scene {
             island,
             assets: Assets::load(pack)?,
             skybox: if panorama_sky {
-                Skybox::panorama(pack, sun_dir)
+                Skybox::panorama(pack, time, threads)
             } else {
-                Skybox::dusk(sun_dir)
+                Skybox::procedural(time, threads)
             },
-            // Low sun, matching the reference diorama's warm rim light.
-            sun_dir,
-            sun_color: vec3(1.75, 1.42, 1.02),
-            sky_color: vec3(0.34, 0.44, 0.68),
-            ground_color: vec3(0.17, 0.15, 0.16),
+            time_of_day: time.rem_euclid(1.0),
+            cycle_running: false,
+            // A full day in half a minute: long enough to watch, short enough to
+            // demonstrate both states without waiting.
+            cycle_seconds: 30.0,
+            baked_step: (time.rem_euclid(1.0) * SKY_STEPS) as i32,
+            threads,
+            sun_dir: light.key_dir,
+            sun_color: light.key_color,
+            sky_color: light.sky_color,
+            ground_color: light.ground_color,
             lights,
             effect_noise: Noise::new(0xC0FFEE),
             tick: 0,
         })
+    }
+
+    /// Move the clock. Returns true when the lighting actually changed, so the
+    /// caller knows the accumulated image has to be thrown away.
+    pub fn set_time(&mut self, time: f32) -> bool {
+        let time = time.rem_euclid(1.0);
+        if (time - self.time_of_day).abs() < 1e-6 {
+            return false;
+        }
+        self.time_of_day = time;
+
+        let light = daylight::at(time);
+        self.sun_dir = light.key_dir;
+        self.sun_color = light.key_color;
+        self.sky_color = light.sky_color;
+        self.ground_color = light.ground_color;
+
+        // The sky costs a full bake, so it only follows the clock in steps.
+        let step = (time * SKY_STEPS) as i32;
+        if step != self.baked_step {
+            self.baked_step = step;
+            self.skybox.set_time(time, self.threads);
+        }
+        true
+    }
+
+    /// Advance the cycle by `dt` seconds. No-op while the cycle is paused.
+    pub fn advance_cycle(&mut self, dt: f32) -> bool {
+        if !self.cycle_running {
+            return false;
+        }
+        self.set_time(self.time_of_day + dt / self.cycle_seconds.max(0.001))
+    }
+
+    pub fn toggle_cycle(&mut self) {
+        self.cycle_running = !self.cycle_running;
+    }
+
+    pub fn clock(&self) -> String {
+        daylight::clock(self.time_of_day)
     }
 
     pub fn world(&self) -> &World {

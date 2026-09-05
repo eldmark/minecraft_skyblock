@@ -15,11 +15,20 @@ pub struct Input {
     pub reseed: bool,
     pub screenshot: bool,
     pub quality: Option<usize>,
+    /// `D` starts and stops the day/night cycle.
+    pub toggle_cycle: bool,
+    /// `,` and `.` nudge the clock by hand, in fractions of a day.
+    pub time_nudge: f32,
 }
 
 impl Input {
     pub fn is_idle(&self) -> bool {
-        self.orbit == (0.0, 0.0) && self.zoom == 0.0 && !self.reseed && self.quality.is_none()
+        self.orbit == (0.0, 0.0)
+            && self.zoom == 0.0
+            && !self.reseed
+            && self.quality.is_none()
+            && !self.toggle_cycle
+            && self.time_nudge == 0.0
     }
 }
 
@@ -94,6 +103,13 @@ impl WindowOutput {
         }
 
         input.reseed = self.window.is_key_pressed(Key::R, minifb::KeyRepeat::No);
+        input.toggle_cycle = self.window.is_key_pressed(Key::D, minifb::KeyRepeat::No);
+        if self.window.is_key_down(Key::Comma) {
+            input.time_nudge -= 0.004;
+        }
+        if self.window.is_key_down(Key::Period) {
+            input.time_nudge += 0.004;
+        }
         input.screenshot = self.window.is_key_pressed(Key::P, minifb::KeyRepeat::No);
         for (i, key) in [Key::Key1, Key::Key2, Key::Key3, Key::Key4].iter().enumerate() {
             if self.window.is_key_pressed(*key, minifb::KeyRepeat::No) {

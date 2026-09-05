@@ -6,9 +6,11 @@
 //! * a real cubemap built from the pack's own panorama faces (`--sky panorama`),
 //!   which exercises the cube lookup against actual images.
 
+use crate::daylight::{self, DayLight};
 use crate::math::{vec3, Vec3};
 use crate::noise::Noise;
 use crate::pack::Pack;
+use crate::parallel::process_chunks;
 use crate::texture::Texture;
 
 /// Minecraft's title-screen panorama, which every pack ships: six 768x768 faces.
@@ -36,48 +38,54 @@ pub enum Skybox {
 const TABLE_W: usize = 1024;
 const TABLE_H: usize = 512;
 
-/// Parameters of the procedural dusk sky.
+/// The procedural sky at one instant of the day/night cycle.
 pub struct Sky {
     noise: Noise,
-    pub sun_dir: Vec3,
-    pub zenith: Vec3,
-    pub horizon: Vec3,
-    pub ground: Vec3,
+    pub light: DayLight,
     /// The sky evaluated once per direction and cached: clouds and stars cost
-    /// dozens of hashes per sample, and the sky never changes during a run.
+    /// dozens of hashes per sample, so it is re-evaluated only when the time of
+    /// day actually moves, never per ray.
     table: Vec<Vec3>,
 }
 
 impl Sky {
-    pub fn dusk(sun_dir: Vec3) -> Sky {
+    /// Build the sky for a time of day. `threads` parallelises the bake.
+    pub fn at_time(time: f32, threads: usize) -> Sky {
         let mut sky = Sky {
             noise: Noise::new(0x5EED),
-            sun_dir,
-            zenith: vec3(0.040, 0.075, 0.24),
-            horizon: vec3(0.92, 0.60, 0.44),
-            // Below the horizon the diorama floats over cool mist, as in the
-            // reference: not a second warm gradient, or the island loses contrast.
-            ground: vec3(0.13, 0.17, 0.30),
+            light: daylight::at(time),
             table: Vec::new(),
         };
-        sky.bake();
+        sky.bake(threads);
         sky
     }
 
+    /// Move the sky to another time of day and re-bake it.
+    pub fn set_time(&mut self, time: f32, threads: usize) {
+        self.light = daylight::at(time);
+        self.bake(threads);
+    }
+
     /// Fill the lat-long table by evaluating the analytic sky per texel.
-    fn bake(&mut self) {
-        let mut table = Vec::with_capacity(TABLE_W * TABLE_H);
-        for y in 0..TABLE_H {
+    fn bake(&mut self, threads: usize) {
+        if self.table.len() != TABLE_W * TABLE_H {
+            self.table = vec![Vec3::ZERO; TABLE_W * TABLE_H];
+        }
+        // The borrow checker will not let the closure see `self` while `self.table`
+        // is borrowed mutably, so hand it the pieces it needs.
+        let mut table = std::mem::take(&mut self.table);
+        let this: &Sky = self;
+        process_chunks(&mut table, TABLE_W, threads, |row, first| {
+            let y = first / TABLE_W;
             // Texel centers, so the poles are not sampled exactly.
             let pitch = ((y as f32 + 0.5) / TABLE_H as f32 - 0.5) * std::f32::consts::PI;
             let (sin_p, cos_p) = pitch.sin_cos();
-            for x in 0..TABLE_W {
+            for (x, texel) in row.iter_mut().enumerate() {
                 let yaw = ((x as f32 + 0.5) / TABLE_W as f32) * std::f32::consts::TAU;
                 let (sin_y, cos_y) = yaw.sin_cos();
-                let dir = vec3(cos_p * sin_y, sin_p, cos_p * cos_y);
-                table.push(self.evaluate(dir));
+                *texel = this.evaluate(vec3(cos_p * sin_y, sin_p, cos_p * cos_y));
             }
-        }
+        });
         self.table = table;
     }
 
@@ -113,17 +121,31 @@ impl Sky {
         // Vertical gradient.
         // The exponent keeps the warm band tight to the horizon instead of
         // washing the whole dome orange.
+        let light = &self.light;
+        // The larger the exponent, the further up the horizon color reaches. At
+        // sunset that is exactly what should happen: the warm band climbs the sky.
+        let spread = 0.35 + 1.0 * light.golden;
         let mut color = if up >= 0.0 {
-            self.horizon.lerp(self.zenith, up.powf(0.35))
+            light.horizon.lerp(light.zenith, up.powf(spread))
         } else {
-            self.horizon.lerp(self.ground, (-up).powf(0.28))
+            light.horizon.lerp(light.below, (-up).powf(0.28))
         };
 
-        // Sun: a hard disc inside a wide glow.
-        let cos_sun = dir.dot(self.sun_dir).clamp(-1.0, 1.0);
-        color = color + vec3(1.0, 0.75, 0.45) * cos_sun.max(0.0).powf(64.0) * 1.1;
+        // Sun: a hard disc inside a wide glow, both fading out as it sets.
+        let cos_sun = dir.dot(light.sun_dir).clamp(-1.0, 1.0);
+        let sun_up = (light.sun_dir.y * 6.0 + 0.5).clamp(0.0, 1.0);
+        color = color + vec3(1.0, 0.75, 0.45) * cos_sun.max(0.0).powf(64.0) * 1.1 * sun_up;
         if cos_sun > 0.9995 {
-            color = color + vec3(6.0, 5.2, 4.2);
+            color = color + vec3(6.0, 5.2, 4.2) * sun_up;
+        }
+
+        // Moon: a smaller, colder disc opposite the sun, visible once it is dark.
+        let cos_moon = dir.dot(-light.sun_dir).clamp(-1.0, 1.0);
+        if light.star_strength > 0.01 {
+            color = color
+                + vec3(0.62, 0.68, 0.85) * cos_moon.max(0.0).powf(140.0) * light.star_strength * 2.8;
+            color = color
+                + vec3(0.16, 0.20, 0.30) * cos_moon.max(0.0).powf(24.0) * light.star_strength * 0.5;
         }
 
         // Cloud bands: two octaves of noise sheared along the view direction, only
@@ -134,12 +156,16 @@ impl Sky {
             let clouds = self.noise.fbm2(u * 1.6, v * 1.6, 4, 2.1, 0.55);
             let mask = ((clouds - 0.05) * 2.2).clamp(0.0, 1.0) * band;
             let lit = (cos_sun * 0.5 + 0.5).powf(2.0);
-            let cloud_color = vec3(0.55, 0.45, 0.52).lerp(vec3(1.0, 0.82, 0.62), lit);
+            // Clouds are lit by whatever is in the sky: warm by day, nearly black
+            // against the stars at night.
+            let day_cloud = vec3(0.55, 0.45, 0.52).lerp(vec3(1.0, 0.82, 0.62), lit);
+            let night_cloud = vec3(0.05, 0.06, 0.10);
+            let cloud_color = night_cloud.lerp(day_cloud, light.daylight);
             color = color.lerp(cloud_color, mask * 0.75);
         }
 
-        // Stars, fading in with altitude and away from the sun's glow.
-        if up > 0.05 {
+        // Stars, fading in with altitude and only once the sun is down.
+        if up > 0.05 && light.star_strength > 0.01 {
             let scale = 260.0;
             let cell = (
                 (dir.x * scale).floor() as i32,
@@ -147,9 +173,9 @@ impl Sky {
                 (dir.z * scale).floor() as i32,
             );
             let r = self.noise.value(cell.0, cell.1, cell.2);
-            if r > 0.9975 {
+            if r > 0.9970 {
                 let twinkle = 0.6 + 0.4 * self.noise.value(cell.1, cell.2, cell.0);
-                let fade = ((up - 0.05) * 2.2).clamp(0.0, 1.0) * (1.0 - cos_sun.max(0.0));
+                let fade = ((up - 0.05) * 2.2).clamp(0.0, 1.0) * light.star_strength;
                 color = color + Vec3::ONE * (twinkle * fade * 1.6);
             }
         }
@@ -159,19 +185,30 @@ impl Sky {
 }
 
 impl Skybox {
-    /// The default sky: procedural dusk, no pack images involved.
-    pub fn dusk(sun_dir: Vec3) -> Skybox {
-        Skybox::Procedural(Box::new(Sky::dusk(sun_dir)))
+    /// The default sky: procedural, driven by the time of day.
+    pub fn procedural(time: f32, threads: usize) -> Skybox {
+        Skybox::Procedural(Box::new(Sky::at_time(time, threads)))
     }
 
-    /// Cubemap from the pack's panorama, falling back to the dusk sky.
-    pub fn panorama(pack: &Pack, sun_dir: Vec3) -> Skybox {
+    /// Move the sky to another time of day. The cubemap has no time of day, so it
+    /// only dims; the procedural sky is re-baked.
+    pub fn set_time(&mut self, time: f32, threads: usize) {
+        match self {
+            Skybox::Procedural(sky) => sky.set_time(time, threads),
+            Skybox::Cubemap { exposure, .. } => {
+                *exposure = 0.25 + 0.75 * daylight::at(time).daylight;
+            }
+        }
+    }
+
+    /// Cubemap from the pack's panorama, falling back to the procedural sky.
+    pub fn panorama(pack: &Pack, time: f32, threads: usize) -> Skybox {
         let mut loaded = Vec::with_capacity(6);
         for name in PANORAMA {
             match pack.decode_png(name) {
                 // No normal map wanted for sky imagery, hence strength 0.
                 Ok(image) => loaded.push(Texture::from_image(&image, 0.0)),
-                Err(_) => return Skybox::dusk(sun_dir),
+                Err(_) => return Skybox::procedural(time, threads),
             }
         }
         let faces = <[Texture; 6]>::try_from(loaded)
@@ -304,25 +341,69 @@ mod tests {
     }
 
     fn dusk() -> Sky {
-        Sky::dusk(vec3(0.55, 0.62, 0.36).normalized())
+        Sky::at_time(0.16, 1)
     }
 
     #[test]
     fn the_procedural_sky_is_brighter_towards_the_sun() {
         let sky = dusk();
-        let sun = sky.sun_dir;
+        let sun = sky.light.sun_dir;
         let away = vec3(-0.55, 0.62, -0.36).normalized();
         assert!(sky.sample(sun).max_component() > sky.sample(away).max_component());
     }
 
     #[test]
-    fn the_sky_is_warm_at_the_horizon_and_deep_overhead() {
+    fn the_horizon_reddens_at_sunset_and_stays_blue_at_noon() {
+        let sunset = Sky::at_time(0.48, 1);
+        let noon = Sky::at_time(0.25, 1);
+        let low = vec3(0.0, 0.02, 1.0).normalized();
+        let (warm, cool) = (sunset.sample(low), noon.sample(low));
+        // Clouds sit on the horizon and wash both towards white, so compare the
+        // red/blue ratio rather than asking for an absolutely warm pixel.
+        let warmth = |c: crate::math::Vec3| c.x / c.z.max(1e-3);
+        assert!(
+            warmth(warm) > warmth(cool) * 1.1,
+            "sunset {warm:?} should read warmer than noon {cool:?}"
+        );
+        assert!(cool.z > cool.x, "noon horizon should be blue: {cool:?}");
+    }
+
+    #[test]
+    fn the_horizon_is_brighter_than_the_zenith() {
         let sky = dusk();
         let horizon = sky.sample(vec3(0.0, 0.02, 1.0).normalized());
         let zenith = sky.sample(vec3(0.0, 1.0, 0.0));
-        assert!(horizon.x > horizon.z, "horizon should be warm: {horizon:?}");
         assert!(zenith.z >= zenith.x, "zenith should be cool: {zenith:?}");
         assert!(horizon.max_component() > zenith.max_component());
+    }
+
+    #[test]
+    fn night_is_far_darker_than_day_and_shows_stars() {
+        let noon = Sky::at_time(0.25, 1);
+        let midnight = Sky::at_time(0.75, 1);
+        let up = vec3(0.2, 1.0, 0.1).normalized();
+        assert!(
+            noon.sample(up).max_component() > midnight.sample(up).max_component() * 5.0,
+            "midnight should be much darker than noon"
+        );
+
+        // Stars are sparse, so look for the brightest of many directions: at night
+        // some of them must beat the background, and by day none should.
+        let brightest = |sky: &Sky| {
+            (0..4000)
+                .map(|i| {
+                    let f = i as f32;
+                    let dir = vec3(f.sin(), 0.6 + 0.4 * (f * 0.31).cos(), (f * 1.7).cos())
+                        .normalized();
+                    sky.sample(dir).max_component()
+                })
+                .fold(0.0f32, f32::max)
+        };
+        let night_peak = brightest(&midnight);
+        assert!(
+            night_peak > midnight.sample(up).max_component() * 3.0,
+            "no stars found at night (peak {night_peak})"
+        );
     }
 
     #[test]
@@ -342,9 +423,8 @@ mod tests {
             return;
         }
         let pack = Pack::open(None).expect("pack should open");
-        let sun = vec3(0.55, 0.62, 0.36).normalized();
         assert!(
-            matches!(Skybox::panorama(&pack, sun), Skybox::Cubemap { .. }),
+            matches!(Skybox::panorama(&pack, 0.2, 1), Skybox::Cubemap { .. }),
             "expected the panorama faces to load from the pack"
         );
     }
@@ -354,8 +434,7 @@ mod tests {
         if !Path::new("texturepack").is_dir() {
             return;
         }
-        let sun = vec3(0.55, 0.62, 0.36).normalized();
-        let sky = Skybox::panorama(&Pack::open(None).unwrap(), sun);
+        let sky = Skybox::panorama(&Pack::open(None).unwrap(), 0.2, 1);
         // Straddling the north/east seam must not produce wildly different colors.
         let a = sky.sample(vec3(0.999, 0.1, -1.0).normalized());
         let b = sky.sample(vec3(1.0, 0.1, -0.999).normalized());

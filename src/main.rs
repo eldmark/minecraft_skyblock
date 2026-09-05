@@ -8,6 +8,7 @@
 mod assets;
 mod blocks;
 mod camera;
+mod daylight;
 mod inflate;
 mod noise;
 mod material;
@@ -58,6 +59,11 @@ struct Args {
     panorama_sky: bool,
     /// Jittered samples per frame for offline rendering.
     samples: usize,
+    /// Where in the day/night cycle to start: 0 sunrise, 0.25 noon, 0.5 sunset,
+    /// 0.75 midnight.
+    time: f32,
+    /// Offline: sweep a full day across the rendered frames.
+    cycle: bool,
 }
 
 impl Args {
@@ -71,6 +77,8 @@ impl Args {
             seed: 2024,
             panorama_sky: false,
             samples: 1,
+            time: 0.16,
+            cycle: false,
         };
         let mut argv = std::env::args().skip(1);
         while let Some(arg) = argv.next() {
@@ -105,6 +113,12 @@ impl Args {
                     }
                 }
                 "--sky-panorama" => args.panorama_sky = true,
+                "--time" => {
+                    if let Some(v) = argv.next().and_then(|v| v.parse::<f32>().ok()) {
+                        args.time = v.rem_euclid(1.0);
+                    }
+                }
+                "--cycle" => args.cycle = true,
                 "--samples" => {
                     if let Some(n) = argv.next().and_then(|v| v.parse().ok()) {
                         args.samples = n;
@@ -146,14 +160,16 @@ usage: skyblock [--window | --render DIR | --bench N] [--frames N] [--width W] [
   --seed N         terrain seed (R reseeds in the window)
   --sky-panorama   use the pack's panorama cubemap instead of the dusk sky
   --samples N      jittered samples per offline frame (antialiasing)
+  --time T         time of day in [0,1): 0 sunrise, .25 noon, .5 sunset, .75 night
+  --cycle          offline: sweep a full day/night cycle across the frames
   --check-pack     decode textures from the resource pack and report findings
   --dump NAME OUT  decode one pack entry and write its raw RGBA bytes";
 
 /// Load the resource pack and build the scene, with a clear message when the pack
 /// is missing: it is not committed to the repository.
-fn load_scene(seed: u32, panorama_sky: bool) -> io::Result<Scene> {
+fn load_scene(seed: u32, panorama_sky: bool, time: f32) -> io::Result<Scene> {
     let pack = pack::Pack::open(None).map_err(io::Error::other)?;
-    Scene::load(seed, &pack, panorama_sky).map_err(io::Error::other)
+    Scene::load(seed, &pack, panorama_sky, time).map_err(io::Error::other)
 }
 
 fn scene_camera(world: &World) -> Camera {
@@ -168,7 +184,7 @@ fn scene_camera(world: &World) -> Camera {
 }
 
 fn run_headless(mut out: Box<dyn Output>, args: &Args, report: bool) -> io::Result<()> {
-    let mut scene = load_scene(args.seed, args.panorama_sky)?;
+    let mut scene = load_scene(args.seed, args.panorama_sky, args.time)?;
     let mut camera = scene_camera(scene.world());
     let mut frame = Framebuffer::new(args.width, args.height);
     let mut renderer = Renderer::new();
@@ -181,6 +197,10 @@ fn run_headless(mut out: Box<dyn Output>, args: &Args, report: bool) -> io::Resu
     loop {
         // A full turn over the requested frame count, so --render yields a loop.
         camera.yaw = std::f32::consts::TAU * rendered as f32 / args.frames.max(1) as f32;
+        if args.cycle {
+            // One full day across the sequence, so the clip shows both states.
+            scene.set_time(args.time + rendered as f32 / args.frames.max(1) as f32);
+        }
         if args.samples <= 1 {
             renderer.render(&mut frame, &scene, &camera);
         } else {
@@ -210,7 +230,7 @@ fn run_headless(mut out: Box<dyn Output>, args: &Args, report: bool) -> io::Resu
 }
 
 fn run_window(args: &Args) -> io::Result<()> {
-    let mut scene = load_scene(args.seed, args.panorama_sky)?;
+    let mut scene = load_scene(args.seed, args.panorama_sky, args.time)?;
     let mut camera = scene_camera(scene.world());
     let mut win = WindowOutput::new("Skyblock Diorama", args.width, args.height)?;
     let mut frame = Framebuffer::new(args.width, args.height);
@@ -220,11 +240,25 @@ fn run_window(args: &Args) -> io::Result<()> {
     }
     let mut shots = 0usize;
     let mut quality = 1usize;
+    let mut last_frame_seconds = 1.0 / 60.0;
 
     while win.is_open() {
         let frame_start = Instant::now();
         let input = win.poll_input();
         camera.apply(input.orbit, input.zoom);
+
+        if input.toggle_cycle {
+            scene.toggle_cycle();
+            println!(
+                "day/night cycle {}",
+                if scene.cycle_running { "running" } else { "paused" }
+            );
+        }
+        let mut time_changed = false;
+        if input.time_nudge != 0.0 {
+            time_changed |= scene.set_time(scene.time_of_day + input.time_nudge);
+        }
+        time_changed |= scene.advance_cycle(last_frame_seconds);
 
         if input.reseed {
             let seed = scene
@@ -245,7 +279,7 @@ fn run_window(args: &Args) -> io::Result<()> {
         // While the camera moves: drop resolution and re-render every frame.
         // Once it settles: full resolution, and keep folding in jittered samples
         // until the image converges, which is where the antialiasing comes from.
-        let moving = !input.is_idle() || resized || input.reseed;
+        let moving = !input.is_idle() || resized || input.reseed || time_changed;
         if moving {
             renderer.scale = quality.max(2);
             renderer.render(&mut frame, &scene, &camera);
@@ -271,13 +305,15 @@ fn run_window(args: &Args) -> io::Result<()> {
         }
 
         let ms = frame_start.elapsed().as_secs_f64() * 1000.0;
+        last_frame_seconds = (ms / 1000.0) as f32;
         win.set_status(&format!(
-            "{ms:.1} ms  {:.0} fps  {w}x{h}/{}  {} threads  {} spp  dist {:.0}",
+            "{ms:.1} ms  {:.0} fps  {w}x{h}/{}  {} threads  {} spp  {} {}",
             1000.0 / ms.max(0.001),
             renderer.scale,
             renderer.threads,
             renderer.samples.max(1),
-            camera.distance
+            scene.clock(),
+            if scene.cycle_running { "(D: running)" } else { "(D: paused)" }
         ));
         if !win.present(&frame)? {
             break;

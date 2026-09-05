@@ -21,23 +21,41 @@ pub fn render_strips<F>(pixels: &mut [u32], width: usize, rows_per_strip: usize,
 where
     F: Fn(&mut [u32], usize) + Sync,
 {
-    let rows_per_strip = rows_per_strip.max(1);
-    let mut strips: Vec<(usize, &mut [u32])> = pixels
-        .chunks_mut(width * rows_per_strip)
+    let width = width.max(1);
+    let chunk = width * rows_per_strip.max(1);
+    process_chunks(pixels, chunk, threads, |slice, first| {
+        render(slice, first / width)
+    });
+}
+
+/// Split a slice into chunks and hand them out to workers from a shared queue.
+///
+/// The same dynamic scheduling serves both the framebuffer and the sky table:
+/// chunks differ wildly in cost (empty sky against the island, poles against the
+/// equator), so a fixed split would leave threads waiting on the slowest one.
+/// `process` receives the chunk and the index of its first element.
+pub fn process_chunks<T, F>(data: &mut [T], chunk: usize, threads: usize, process: F)
+where
+    T: Send,
+    F: Fn(&mut [T], usize) + Sync,
+{
+    let chunk = chunk.max(1);
+    let mut chunks: Vec<(usize, &mut [T])> = data
+        .chunks_mut(chunk)
         .enumerate()
-        .map(|(i, slice)| (i * rows_per_strip, slice))
+        .map(|(i, slice)| (i * chunk, slice))
         .collect();
 
-    if threads <= 1 || strips.len() <= 1 {
-        for (first_row, slice) in strips.iter_mut() {
-            render(slice, *first_row);
+    if threads <= 1 || chunks.len() <= 1 {
+        for (first, slice) in chunks.iter_mut() {
+            process(slice, *first);
         }
         return;
     }
 
     let next = AtomicUsize::new(0);
-    let queue = Mutex::new(strips);
-    let render = &render;
+    let queue = Mutex::new(chunks);
+    let process = &process;
 
     thread::scope(|scope| {
         for _ in 0..threads {
@@ -50,12 +68,12 @@ where
                         None
                     } else {
                         // Swap the slice out so the borrow leaves the mutex with us.
-                        let (first_row, slice) = &mut guard[index];
-                        Some((*first_row, std::mem::take(slice)))
+                        let (first, slice) = &mut guard[index];
+                        Some((*first, std::mem::take(slice)))
                     }
                 };
                 match claimed {
-                    Some((first_row, slice)) => render(slice, first_row),
+                    Some((first, slice)) => process(slice, first),
                     None => break,
                 }
             });
@@ -94,6 +112,17 @@ mod tests {
                 assert_eq!(fill(threads, rows), single, "threads={threads} rows={rows}");
             }
         }
+    }
+
+    #[test]
+    fn chunks_are_processed_exactly_once() {
+        let mut data: Vec<usize> = vec![0; 1000];
+        process_chunks(&mut data, 37, 8, |chunk, first| {
+            for (i, slot) in chunk.iter_mut().enumerate() {
+                *slot = first + i;
+            }
+        });
+        assert_eq!(data, (0..1000).collect::<Vec<usize>>());
     }
 
     #[test]
