@@ -24,8 +24,16 @@ pub const QUARTZ_PILLAR: Block = 17;
 pub const GLOWSTONE: Block = 18;
 pub const GLASS: Block = 19;
 pub const PORTAL: Block = 20;
+pub const STONE_BRICKS: Block = 21;
+pub const MOSSY_STONE_BRICKS: Block = 22;
+pub const CRACKED_STONE_BRICKS: Block = 23;
+pub const CHISELED_QUARTZ: Block = 24;
+pub const QUARTZ_BRICKS: Block = 25;
+pub const GRAVEL: Block = 26;
+pub const MOSS: Block = 27;
+pub const FLOWERING_LEAVES: Block = 28;
 
-pub const COUNT: usize = 21;
+pub const COUNT: usize = 29;
 
 /// Blocks that emit light of their own.
 pub fn is_emissive(block: Block) -> bool {
@@ -57,6 +65,14 @@ pub fn name(block: Block) -> &'static str {
         GLOWSTONE => "glowstone",
         GLASS => "glass",
         PORTAL => "portal",
+        STONE_BRICKS => "stone_bricks",
+        MOSSY_STONE_BRICKS => "mossy_stone_bricks",
+        CRACKED_STONE_BRICKS => "cracked_stone_bricks",
+        CHISELED_QUARTZ => "chiseled_quartz_block",
+        QUARTZ_BRICKS => "quartz_bricks",
+        GRAVEL => "gravel",
+        MOSS => "moss_block",
+        FLOWERING_LEAVES => "flowering_azalea_leaves",
         _ => "unknown",
     }
 }

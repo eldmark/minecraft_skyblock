@@ -33,7 +33,7 @@ impl Scene {
     pub fn load(seed: u32, pack: &Pack, panorama_sky: bool) -> Result<Scene, String> {
         let sun_dir = vec3(0.55, 0.62, 0.36).normalized();
         let mut island = terrain::generate(seed);
-        structures::place_shrine(&mut island);
+        structures::place_all(&mut island);
         let lights = structures::collect_lights(&island.world);
         Ok(Scene {
             island,
@@ -60,7 +60,7 @@ impl Scene {
 
     pub fn reseed(&mut self, seed: u32) {
         let mut island = terrain::generate(seed);
-        structures::place_shrine(&mut island);
+        structures::place_all(&mut island);
         self.lights = structures::collect_lights(&island.world);
         self.island = island;
     }

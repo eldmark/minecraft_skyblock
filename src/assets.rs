@@ -85,7 +85,7 @@ impl Assets {
                 "water_still",
                 // Clear enough that the sandy pond floor shows through: the point
                 // of refraction is seeing what is behind the surface.
-                Material::refractive(0.88, 1.33, 0.30).with_tint(vec3(0.72, 0.88, 1.0)),
+                Material::refractive(0.88, 1.33, 0.30).with_tint(vec3(0.62, 0.95, 1.05)),
             ),
             (
                 blocks::OAK_LOG,
@@ -216,6 +216,74 @@ impl Assets {
                 Material::refractive(0.72, 1.45, 0.20)
                     .with_tint(vec3(0.55, 0.75, 1.0))
                     .with_emission(0.9),
+            ),
+            (
+                blocks::STONE_BRICKS,
+                "stone_bricks",
+                "stone_bricks",
+                "stone_bricks",
+                Material::diffuse(4.0),
+            ),
+            (
+                blocks::MOSSY_STONE_BRICKS,
+                "mossy_stone_bricks",
+                "mossy_stone_bricks",
+                "mossy_stone_bricks",
+                Material::diffuse(4.0),
+            ),
+            (
+                blocks::CRACKED_STONE_BRICKS,
+                "cracked_stone_bricks",
+                "cracked_stone_bricks",
+                "cracked_stone_bricks",
+                Material::diffuse(4.5),
+            ),
+            (
+                blocks::CHISELED_QUARTZ,
+                "chiseled_quartz_block_top",
+                "chiseled_quartz_block",
+                "chiseled_quartz_block_top",
+                Material {
+                    specular: 0.28,
+                    shininess: 44.0,
+                    reflectivity: 0.07,
+                    normal_strength: 3.0,
+                    ..Material::default()
+                },
+            ),
+            (
+                blocks::QUARTZ_BRICKS,
+                "quartz_bricks",
+                "quartz_bricks",
+                "quartz_bricks",
+                Material {
+                    specular: 0.22,
+                    shininess: 36.0,
+                    reflectivity: 0.05,
+                    normal_strength: 3.0,
+                    ..Material::default()
+                },
+            ),
+            (
+                blocks::GRAVEL,
+                "gravel",
+                "gravel",
+                "gravel",
+                Material::diffuse(3.0),
+            ),
+            (
+                blocks::MOSS,
+                "moss_block",
+                "moss_block",
+                "moss_block",
+                Material::diffuse(2.0).with_tint(vec3(0.62, 0.85, 0.55)),
+            ),
+            (
+                blocks::FLOWERING_LEAVES,
+                "flowering_azalea_leaves",
+                "flowering_azalea_leaves",
+                "flowering_azalea_leaves",
+                Material::diffuse(1.5),
             ),
         ];
 

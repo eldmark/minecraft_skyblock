@@ -21,7 +21,7 @@ cargo run --release                              # ventana interactiva
 cargo run --release -- --render out/ -n 240 --samples 8   # órbita a PNGs, sin ventana
 cargo run --release -- --bench 30                # medición de ms/frame
 cargo run --release -- --check-pack              # verifica la carga del texture pack
-cargo test --release                             # 83 pruebas
+cargo test --release                             # 85 pruebas
 ```
 
 Opciones: `--width W --height H --seed N --threads N --samples N --sky-panorama`.
@@ -56,7 +56,8 @@ El programa lee las texturas directamente del ZIP con su propio DEFLATE.
 
 | Elemento | Dónde |
 |---|---|
-| Terreno procedural 32×32 (supera el mínimo de 16×16) | `terrain.rs` — Perlin/fBm propio, isla con estalactita, poza, cascada, vetas de mineral, árboles |
+| Terreno procedural 48×48 (supera el mínimo de 16×16) | `terrain.rs` — Perlin/fBm propio, isla con estalactita, montículo rocoso, río con dos cascadas, vetas de mineral, árboles |
+| Complejidad de escena | `structures.rs` — templo, gran árbol, puente, ruina |
 | Rotación y zoom de cámara | `camera.rs` — cámara orbital con pitch acotado y zoom multiplicativo |
 | 5 materiales con textura y parámetros propios | `assets.rs` — terreno, agua, metal, emisivo, cristal |
 | Refracción | `render.rs` — Snell con reflexión interna total; agua y puerta de cristal |
@@ -66,17 +67,23 @@ El programa lee las texturas directamente del ZIP con su propio DEFLATE.
 | Skybox | `skybox.rs` — cielo de atardecer procedural (por defecto) o cubemap del panorama |
 | Paralelismo y optimización | `parallel.rs`, tabla de mediciones abajo |
 
+## La escena
+
+Siguiendo el diorama de referencia: isla flotante con un **templo de columnas** y su
+puerta de cristal iluminada, un **gran árbol** sobre un afloramiento rocoso, un **río**
+que cruza la isla y cae por los dos bordes, un **puente de piedra** con linternas, y
+una **ruina** de columnas rotas en primer plano. Debajo, vetas de oro, hierro y
+diamante que solo se ven al orbitar por abajo.
+
 ## Rendimiento
 
-Escena completa, 900×600, CPU de 8 núcleos / 16 hilos:
+Escena completa (isla 48×48), 900×600, CPU de 8 núcleos / 16 hilos:
 
 | Hilos | ms/frame | fps | Aceleración |
 |---|---|---|---|
-| 1 | 212.92 | 4.7 | 1.00× |
-| 2 | 110.83 | 9.0 | 1.92× |
-| 4 | 56.98 | 17.5 | 3.74× |
-| 8 | 29.43 | 34.0 | 7.23× |
-| 16 | 23.32 | 42.9 | **9.13×** |
+| 1 | 239.85 | 4.2 | 1.00× |
+| 4 | 63.92 | 15.6 | 3.75× |
+| 16 | 28.07 | 35.6 | **8.55×** |
 
 Optimizaciones aplicadas, cada una medida a 640×520 con 16 hilos:
 
@@ -109,8 +116,8 @@ src/
   material.rs    parámetros ópticos por material
   assets.rs      bloque → textura por cara → material
   noise.rs       Perlin 2D/3D y fBm
-  terrain.rs     generación procedural de la isla
-  structures.rs  el santuario y las luces
+  terrain.rs     generación procedural de la isla, el montículo y el río
+  structures.rs  templo, gran árbol, puente, ruina y las luces
   world.rs       grid de vóxeles + DDA
   camera.rs      cámara orbital
   skybox.rs      cielo procedural y cubemap

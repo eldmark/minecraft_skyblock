@@ -2,19 +2,33 @@
 //!
 //! `generate(seed)` is pure: same seed, same island. That is what lets `R` rebuild
 //! the world in place while the camera keeps its position.
+//!
+//! The layout follows the reference diorama: a rocky outcrop on one side for the
+//! great tree, a stream running across the middle and spilling off both rims, and
+//! a broad terrace on the far side where the temple stands.
 
 use crate::blocks::*;
 use crate::noise::Noise;
 use crate::world::World;
 
 /// Island footprint in blocks. The rubric asks for at least 16x16.
-pub const SIZE: usize = 32;
-pub const HEIGHT: usize = 44;
+pub const SIZE: usize = 48;
+pub const HEIGHT: usize = 60;
 
 /// Ground level around which the surface undulates.
-pub const SURFACE_LEVEL: f32 = 26.0;
-/// Everything at or below this level inside a basin fills with water.
-const WATER_LEVEL: i32 = 26;
+pub const SURFACE_LEVEL: f32 = 32.0;
+/// The stream's water line.
+pub const WATER_LEVEL: i32 = 32;
+
+/// The rocky outcrop that carries the great tree.
+pub const HILL: (f32, f32) = (11.0, 15.0);
+const HILL_RADIUS: f32 = 10.0;
+const HILL_HEIGHT: f32 = 9.0;
+
+/// The stream runs between these two rim points, and falls off at both.
+const RIVER_FROM: (f32, f32) = (1.0, 40.0);
+const RIVER_TO: (f32, f32) = (47.0, 25.0);
+const RIVER_HALF_WIDTH: f32 = 2.1;
 
 pub struct Island {
     pub world: World,
@@ -44,7 +58,7 @@ fn radial_falloff(noise: &Noise, x: f32, z: f32) -> f32 {
     let center = SIZE as f32 * 0.5 - 0.5;
     let (dx, dz) = (x - center, z - center);
     let radius = (dx * dx + dz * dz).sqrt();
-    let wobble = noise.fbm2(x * 0.09, z * 0.09, 3, 2.0, 0.5) * 2.6;
+    let wobble = noise.fbm2(x * 0.07, z * 0.07, 3, 2.0, 0.5) * 3.4;
     let edge = SIZE as f32 * 0.47 + wobble;
     (1.0 - radius / edge.max(1e-3)).clamp(0.0, 1.0)
 }
@@ -52,9 +66,33 @@ fn radial_falloff(noise: &Noise, x: f32, z: f32) -> f32 {
 /// Smooth 0..1 mask for the ground surface. Saturates over most of the island so
 /// the top stays broad and only the last few blocks roll off.
 fn island_mask(noise: &Noise, x: f32, z: f32) -> f32 {
-    let t = (radial_falloff(noise, x, z) / 0.30).clamp(0.0, 1.0);
+    let t = (radial_falloff(noise, x, z) / 0.22).clamp(0.0, 1.0);
     // Smoothstep, so the rim rolls off instead of stepping.
     t * t * (3.0 - 2.0 * t)
+}
+
+/// Extra height from the rocky outcrop: a smooth dome with a noisy crest.
+fn hill_height(noise: &Noise, x: f32, z: f32) -> f32 {
+    let d = ((x - HILL.0).powi(2) + (z - HILL.1).powi(2)).sqrt();
+    let t = (1.0 - d / HILL_RADIUS).clamp(0.0, 1.0);
+    let shaped = t * t * (3.0 - 2.0 * t);
+    let crest = noise.fbm2(x * 0.16 + 9.0, z * 0.16 - 4.0, 3, 2.0, 0.5) * 2.2;
+    shaped * (HILL_HEIGHT + crest * shaped)
+}
+
+/// Distance from a column to the stream's centre line, in blocks.
+fn river_distance(noise: &Noise, x: f32, z: f32) -> f32 {
+    let (ax, az) = RIVER_FROM;
+    let (bx, bz) = RIVER_TO;
+    let (dx, dz) = (bx - ax, bz - az);
+    let len2 = dx * dx + dz * dz;
+    // Projection onto the segment, clamped so the ends do not flare out.
+    let t = (((x - ax) * dx + (z - az) * dz) / len2).clamp(0.0, 1.0);
+    let (cx, cz) = (ax + dx * t, az + dz * t);
+    let straight = ((x - cx).powi(2) + (z - cz).powi(2)).sqrt();
+    // A meander, so the stream is not a ruler-straight line.
+    let meander = noise.fbm2(t * 6.0, 3.0, 3, 2.0, 0.5) * 2.8;
+    (straight - meander.abs()).max(0.0)
 }
 
 pub fn generate(seed: u32) -> Island {
@@ -71,22 +109,29 @@ pub fn generate(seed: u32) -> Island {
             }
 
             // Rolling ground: two octave bands, one broad, one for small bumps.
-            let relief = noise.fbm2(fx * 0.07, fz * 0.07, 4, 2.0, 0.5) * 3.2
-                + noise.fbm2(fx * 0.21, fz * 0.21, 2, 2.0, 0.5) * 0.9;
-            let top = (SURFACE_LEVEL + relief * mask - (1.0 - mask) * 3.0).round() as i32;
+            let relief = noise.fbm2(fx * 0.06, fz * 0.06, 4, 2.0, 0.5) * 3.0
+                + noise.fbm2(fx * 0.19, fz * 0.19, 2, 2.0, 0.5) * 0.8;
+            let hill = hill_height(&noise, fx, fz);
+            let top = (SURFACE_LEVEL + relief * mask + hill * mask - (1.0 - mask) * 3.5).round() as i32;
 
             // Underside: a stalactite, not a cylinder. Driven by the raw radial
             // falloff rather than the saturated surface mask, so the rock keeps
             // narrowing all the way to a point under the middle of the island.
             let taper = radial_falloff(&noise, fx, fz).powf(0.75);
+            // Deep enough to read as a torn-out chunk, shallow enough that the
+            // point never reaches the bottom of the world.
             let depth = 2.0
-                + 24.0 * taper
-                + noise.fbm2(fx * 0.13 + 40.0, fz * 0.13 - 25.0, 3, 2.0, 0.55) * 5.0 * taper;
-            let bottom = (top as f32 - depth).round().max(0.0) as i32;
+                + 21.0 * taper
+                + noise.fbm2(fx * 0.11 + 40.0, fz * 0.11 - 25.0, 3, 2.0, 0.55) * 5.0 * taper;
+            let bottom = (top as f32 - depth - hill * 0.3).round().max(1.0) as i32;
 
             for y in bottom..=top {
                 let from_top = top - y;
-                let block = if from_top == 0 {
+                // The outcrop is bare rock near its crest, grass lower down.
+                let rocky = hill > 4.5 && from_top <= 1 && noise.value(x, y, z) > 0.25;
+                let block = if rocky {
+                    STONE
+                } else if from_top == 0 {
                     GRASS
                 } else if from_top <= 2 {
                     DIRT
@@ -99,7 +144,7 @@ pub fn generate(seed: u32) -> Island {
         }
     }
 
-    carve_basin(&mut world, &noise, &mut surface);
+    carve_river(&mut world, &noise, &mut surface);
     place_ores(&mut world, &noise);
     plant_trees(&mut world, &noise, &surface);
 
@@ -110,76 +155,75 @@ pub fn generate(seed: u32) -> Island {
     }
 }
 
-/// Carve a pond and the channel that spills off the rim, then fill both with water.
-/// The waterfall is what makes the island read as floating rather than as a plate.
-fn carve_basin(world: &mut World, noise: &Noise, surface: &mut [Option<i32>]) {
-    let pond = (11.0f32, 19.0f32);
-    let pond_radius = 4.2f32;
-
-    let carve = |world: &mut World, surface: &mut [Option<i32>], x: i32, z: i32, floor: i32, bed: Block| {
-        let Some(top) = surface[z as usize * SIZE + x as usize] else {
-            return;
+/// Carve the stream bed across the island and fill it, then pour whatever reaches
+/// a rim off the edge. Two waterfalls is what sells the island as floating.
+fn carve_river(world: &mut World, noise: &Noise, surface: &mut [Option<i32>]) {
+    let carve =
+        |world: &mut World, surface: &mut [Option<i32>], x: i32, z: i32, floor: i32, bed: Block| {
+            let Some(top) = surface[z as usize * SIZE + x as usize] else {
+                return;
+            };
+            for y in floor + 1..=top.max(WATER_LEVEL) {
+                world.set(x, y, z, AIR);
+            }
+            for y in floor + 1..=WATER_LEVEL {
+                world.set(x, y, z, WATER);
+            }
+            world.set(x, floor, z, bed);
+            surface[z as usize * SIZE + x as usize] = Some(floor);
         };
-        for y in floor + 1..=top.max(WATER_LEVEL) {
-            world.set(x, y, z, AIR);
-        }
-        for y in floor + 1..=WATER_LEVEL {
-            world.set(x, y, z, WATER);
-        }
-        world.set(x, floor, z, bed);
-        surface[z as usize * SIZE + x as usize] = Some(floor);
-    };
 
     for z in 0..SIZE as i32 {
         for x in 0..SIZE as i32 {
             let (fx, fz) = (x as f32, z as f32);
-            let d = ((fx - pond.0).powi(2) + (fz - pond.1).powi(2)).sqrt();
-            let wobble = noise.fbm2(fx * 0.25 + 11.0, fz * 0.25 + 3.0, 2, 2.0, 0.5) * 1.4;
-            if d + wobble < pond_radius {
-                carve(world, surface, x, z, WATER_LEVEL - 2, SAND);
+            let d = river_distance(noise, fx, fz);
+            if d > RIVER_HALF_WIDTH + 1.0 {
+                continue;
             }
-        }
-    }
-
-    // Walk outward from the pond towards the rim, carving a channel one block wide
-    // until the ground runs out. Following the actual terrain instead of a fixed
-    // line guarantees the stream reaches an edge whatever the seed produced.
-    let (dx, dz) = (-0.80f32, -0.60f32);
-    let mut spill = None;
-    for step in 0..SIZE as i32 {
-        let fx = pond.0 + dx * (pond_radius - 1.0 + step as f32);
-        let fz = pond.1 + dz * (pond_radius - 1.0 + step as f32);
-        let (x, z) = (fx.round() as i32, fz.round() as i32);
-        if x < 0 || z < 0 || x >= SIZE as i32 || z >= SIZE as i32 {
-            break;
-        }
-        if surface[z as usize * SIZE + x as usize].is_none() {
-            // Past the rim: this is where the water leaves the island.
-            spill = Some((x, z));
-            break;
-        }
-        carve(world, surface, x, z, WATER_LEVEL - 1, COBBLESTONE);
-        // Widen the channel a little so it does not read as a one-pixel scratch.
-        for (ox, oz) in [(1, 0), (0, 1)] {
-            let (nx, nz) = (x + ox, z + oz);
-            if nx < SIZE as i32 && nz < SIZE as i32 && surface[nz as usize * SIZE + nx as usize].is_some() {
-                carve(world, surface, nx, nz, WATER_LEVEL - 1, COBBLESTONE);
-            }
-        }
-    }
-
-    // Pour the stream off the edge. The fall is cut short rather than run to the
-    // bottom of the world: water thinning out into the void reads better than
-    // water hitting an invisible floor.
-    if let Some((x, z)) = spill {
-        let fall_bottom = (WATER_LEVEL - 15).max(1);
-        for (cx, cz) in [(x, z), (x + 1, z), (x, z + 1)] {
-            for y in (fall_bottom..=WATER_LEVEL).rev() {
-                if world.get(cx, y, cz) != AIR {
-                    break;
+            if d <= RIVER_HALF_WIDTH {
+                // Deeper in the middle than at the sides, so the bed reads round.
+                let floor = if d < RIVER_HALF_WIDTH * 0.55 {
+                    WATER_LEVEL - 2
+                } else {
+                    WATER_LEVEL - 1
+                };
+                carve(world, surface, x, z, floor, GRAVEL);
+            } else if let Some(top) = surface[z as usize * SIZE + x as usize] {
+                // Gravelly bank right at the water's edge.
+                if top <= WATER_LEVEL + 1 && world.get(x, top, z) == GRASS {
+                    world.set(x, top, z, GRAVEL);
                 }
-                world.set(cx, y, cz, WATER);
             }
+        }
+    }
+
+    // Where the stream meets open air, pour it into the void. The fall is cut
+    // short rather than run to the bottom of the world: water thinning out reads
+    // better than water hitting an invisible floor.
+    let fall_bottom = (WATER_LEVEL - 20).max(1);
+    let mut spills = Vec::new();
+    for z in 0..SIZE as i32 {
+        for x in 0..SIZE as i32 {
+            if world.get(x, WATER_LEVEL, z) != WATER {
+                continue;
+            }
+            for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
+                let (nx, nz) = (x + dx, z + dz);
+                if world.get(nx, WATER_LEVEL, nz) == AIR
+                    && world.get(nx, WATER_LEVEL - 1, nz) == AIR
+                    && world.get(nx, WATER_LEVEL - 3, nz) == AIR
+                {
+                    spills.push((nx, nz));
+                }
+            }
+        }
+    }
+    for (x, z) in spills {
+        for y in (fall_bottom..=WATER_LEVEL).rev() {
+            if world.get(x, y, z) != AIR {
+                break;
+            }
+            world.set(x, y, z, WATER);
         }
     }
 }
@@ -205,9 +249,9 @@ fn place_ores(world: &mut World, noise: &Noise) {
                     )
                 };
                 let depth_below = SURFACE_LEVEL as i32 - y;
-                let block = if depth_below > 14 && vein(0.30, 91.0) > 0.42 {
+                let block = if depth_below > 16 && vein(0.30, 91.0) > 0.42 {
                     DIAMOND_ORE
-                } else if depth_below > 8 && vein(0.26, 17.0) > 0.40 {
+                } else if depth_below > 9 && vein(0.26, 17.0) > 0.40 {
                     GOLD_ORE
                 } else if depth_below > 4 && vein(0.22, 53.0) > 0.36 {
                     IRON_ORE
@@ -230,17 +274,22 @@ fn place_ores(world: &mut World, noise: &Noise) {
     }
 }
 
-/// Oak trees on grass, spaced by a per-cell jitter so they never form a lattice.
+/// Ordinary oak trees, kept away from the outcrop (the great tree lives there) and
+/// off the temple terrace, which `structures` levels afterwards.
 fn plant_trees(world: &mut World, noise: &Noise, surface: &[Option<i32>]) {
-    const CELL: i32 = 7;
+    const CELL: i32 = 8;
     for cz in 0..(SIZE as i32 / CELL) + 1 {
         for cx in 0..(SIZE as i32 / CELL) + 1 {
-            if noise.value(cx, 0, cz) > 0.55 {
+            if noise.value(cx, 0, cz) > 0.6 {
                 continue;
             }
             let x = cx * CELL + (noise.value(cx, 1, cz) * CELL as f32) as i32;
             let z = cz * CELL + (noise.value(cx, 2, cz) * CELL as f32) as i32;
             if x < 2 || z < 2 || x >= SIZE as i32 - 2 || z >= SIZE as i32 - 2 {
+                continue;
+            }
+            // Keep the outcrop clear for the great tree.
+            if ((x as f32 - HILL.0).powi(2) + (z as f32 - HILL.1).powi(2)).sqrt() < 7.0 {
                 continue;
             }
             let Some(top) = surface[z as usize * SIZE + x as usize] else {
@@ -282,7 +331,7 @@ mod tests {
         let a = generate(2024);
         let b = generate(2024);
         assert_eq!(a.world.solid_count(), b.world.solid_count());
-        for (x, z) in [(4, 4), (16, 16), (27, 9)] {
+        for (x, z) in [(4, 4), (24, 24), (41, 9)] {
             assert_eq!(a.surface_at(x, z), b.surface_at(x, z));
         }
     }
@@ -315,7 +364,54 @@ mod tests {
     }
 
     #[test]
-    fn the_surface_is_grass_or_water_and_stone_lies_underneath() {
+    fn the_outcrop_rises_above_the_surrounding_ground() {
+        let island = generate(3);
+        let hill = island
+            .surface_at(HILL.0 as i32, HILL.1 as i32)
+            .expect("the outcrop should have ground");
+        let plain = island
+            .surface_at(SIZE as i32 - 12, SIZE as i32 / 2)
+            .expect("the plain should have ground");
+        assert!(
+            hill > plain + 4,
+            "outcrop at {hill} barely rises over the plain at {plain}"
+        );
+    }
+
+    #[test]
+    fn the_stream_crosses_the_island_and_falls_off_both_rims() {
+        for seed in [1, 9, 2024, 31337] {
+            let island = generate(seed);
+            let mut water = 0;
+            let mut falling_low_x = 0;
+            let mut falling_high_x = 0;
+            for z in 0..SIZE as i32 {
+                for x in 0..SIZE as i32 {
+                    for y in 0..HEIGHT as i32 {
+                        if island.world.get(x, y, z) != WATER {
+                            continue;
+                        }
+                        water += 1;
+                        if y < WATER_LEVEL - 3 {
+                            if x < SIZE as i32 / 2 {
+                                falling_low_x += 1;
+                            } else {
+                                falling_high_x += 1;
+                            }
+                        }
+                    }
+                }
+            }
+            assert!(water > 200, "seed {seed}: the stream is too small ({water})");
+            assert!(
+                falling_low_x > 0 && falling_high_x > 0,
+                "seed {seed}: expected a waterfall at each end ({falling_low_x}, {falling_high_x})"
+            );
+        }
+    }
+
+    #[test]
+    fn the_surface_is_walkable_material_and_stone_lies_underneath() {
         let island = generate(3);
         let mut checked = 0;
         for z in 0..SIZE as i32 {
@@ -325,14 +421,14 @@ mod tests {
                 };
                 let block = island.world.get(x, top, z);
                 assert!(
-                    matches!(block, GRASS | SAND | COBBLESTONE | WATER),
+                    matches!(block, GRASS | SAND | GRAVEL | STONE | COBBLESTONE | WATER),
                     "unexpected surface block {} at {x},{z}",
                     name(block)
                 );
                 checked += 1;
             }
         }
-        assert!(checked > 200);
+        assert!(checked > 500);
     }
 
     #[test]
@@ -356,33 +452,6 @@ mod tests {
     }
 
     #[test]
-    fn there_is_water_and_it_spills_below_the_pond() {
-        for seed in [1, 9, 77, 2024, 31337] {
-            check_water(seed);
-        }
-    }
-
-    fn check_water(seed: u32) {
-        let island = generate(seed);
-        let mut water = 0;
-        let mut falling = 0;
-        for z in 0..SIZE as i32 {
-            for x in 0..SIZE as i32 {
-                for y in 0..HEIGHT as i32 {
-                    if island.world.get(x, y, z) == WATER {
-                        water += 1;
-                        if y < WATER_LEVEL - 2 {
-                            falling += 1;
-                        }
-                    }
-                }
-            }
-        }
-        assert!(water > 20, "seed {seed}: expected a pond, found {water} water blocks");
-        assert!(falling > 0, "seed {seed}: expected a waterfall over the rim");
-    }
-
-    #[test]
     fn trees_stand_on_the_ground_with_leaves_above() {
         let island = generate(4);
         let mut logs = 0;
@@ -400,35 +469,5 @@ mod tests {
         }
         assert!(logs >= 4, "expected at least one tree, found {logs} logs");
         assert!(leaves > logs, "trees should have more leaves than trunk");
-    }
-}
-
-#[cfg(test)]
-mod debug_map {
-    use super::*;
-
-    #[test]
-    fn print_top_down_map() {
-        let island = generate(9);
-        for z in 0..SIZE as i32 {
-            let row: String = (0..SIZE as i32)
-                .map(|x| match island.surface_at(x, z) {
-                    None => ' ',
-                    Some(top) => match island.world.get(x, top, z) {
-                        WATER => 'W',
-                        SAND => 's',
-                        COBBLESTONE => 'c',
-                        GRASS => '.',
-                        _ => '?',
-                    },
-                })
-                .collect();
-            eprintln!("{row}");
-        }
-        let falling: usize = (0..SIZE as i32)
-            .flat_map(|z| (0..SIZE as i32).map(move |x| (x, z)))
-            .map(|(x, z)| (0..24).filter(|&y| island.world.get(x, y, z) == WATER).count())
-            .sum();
-        eprintln!("falling water blocks below y=24: {falling}");
     }
 }
