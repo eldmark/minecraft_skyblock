@@ -107,67 +107,73 @@ pub fn generate(seed: u32) -> Island {
 /// Carve a pond and the channel that spills off the rim, then fill both with water.
 /// The waterfall is what makes the island read as floating rather than as a plate.
 fn carve_basin(world: &mut World, noise: &Noise, surface: &mut [Option<i32>]) {
-    let pond_center = (11.0f32, 19.0f32);
+    let pond = (11.0f32, 19.0f32);
+    let pond_radius = 4.2f32;
+
+    let mut carve = |world: &mut World, surface: &mut [Option<i32>], x: i32, z: i32, floor: i32, bed: Block| {
+        let Some(top) = surface[z as usize * SIZE + x as usize] else {
+            return;
+        };
+        for y in floor + 1..=top.max(WATER_LEVEL) {
+            world.set(x, y, z, AIR);
+        }
+        for y in floor + 1..=WATER_LEVEL {
+            world.set(x, y, z, WATER);
+        }
+        world.set(x, floor, z, bed);
+        surface[z as usize * SIZE + x as usize] = Some(floor);
+    };
+
     for z in 0..SIZE as i32 {
         for x in 0..SIZE as i32 {
             let (fx, fz) = (x as f32, z as f32);
-            let d = ((fx - pond_center.0).powi(2) + (fz - pond_center.1).powi(2)).sqrt();
+            let d = ((fx - pond.0).powi(2) + (fz - pond.1).powi(2)).sqrt();
             let wobble = noise.fbm2(fx * 0.25 + 11.0, fz * 0.25 + 3.0, 2, 2.0, 0.5) * 1.4;
-            let in_pond = d + wobble < 4.2;
-            // A channel running from the pond to the north-west rim.
-            let channel = (fz - (pond_center.1 - (pond_center.0 - fx) * 0.55)).abs() < 1.4
-                && fx < pond_center.0
-                && fx > 1.0;
-
-            if !(in_pond || channel) {
-                continue;
+            if d + wobble < pond_radius {
+                carve(world, surface, x, z, WATER_LEVEL - 2, SAND);
             }
-            let Some(top) = surface[z as usize * SIZE + x as usize] else {
-                continue;
-            };
-
-            let floor = WATER_LEVEL - if in_pond { 2 } else { 1 };
-            for y in floor + 1..=top.max(WATER_LEVEL) {
-                world.set(x, y, z, AIR);
-            }
-            for y in floor + 1..=WATER_LEVEL {
-                world.set(x, y, z, WATER);
-            }
-            world.set(x, floor, z, if in_pond { SAND } else { COBBLESTONE });
-            surface[z as usize * SIZE + x as usize] = Some(floor);
         }
     }
 
-    // Spill: where the water surface meets thin air over the rim, pour a column
-    // down the outside of the island so the pond drains into the void.
-    let mut spills: Vec<(i32, i32)> = Vec::new();
-    for z in 0..SIZE as i32 {
-        for x in 0..SIZE as i32 {
-            if world.get(x, WATER_LEVEL, z) != WATER {
-                continue;
+    // Walk outward from the pond towards the rim, carving a channel one block wide
+    // until the ground runs out. Following the actual terrain instead of a fixed
+    // line guarantees the stream reaches an edge whatever the seed produced.
+    let (dx, dz) = (-0.80f32, -0.60f32);
+    let mut spill = None;
+    for step in 0..SIZE as i32 {
+        let fx = pond.0 + dx * (pond_radius - 1.0 + step as f32);
+        let fz = pond.1 + dz * (pond_radius - 1.0 + step as f32);
+        let (x, z) = (fx.round() as i32, fz.round() as i32);
+        if x < 0 || z < 0 || x >= SIZE as i32 || z >= SIZE as i32 {
+            break;
+        }
+        if surface[z as usize * SIZE + x as usize].is_none() {
+            // Past the rim: this is where the water leaves the island.
+            spill = Some((x, z));
+            break;
+        }
+        carve(world, surface, x, z, WATER_LEVEL - 1, COBBLESTONE);
+        // Widen the channel a little so it does not read as a one-pixel scratch.
+        for (ox, oz) in [(1, 0), (0, 1)] {
+            let (nx, nz) = (x + ox, z + oz);
+            if nx < SIZE as i32 && nz < SIZE as i32 && surface[nz as usize * SIZE + nx as usize].is_some() {
+                carve(world, surface, nx, nz, WATER_LEVEL - 1, COBBLESTONE);
             }
-            for (dx, dz) in [(1, 0), (-1, 0), (0, 1), (0, -1)] {
-                let (nx, nz) = (x + dx, z + dz);
-                // The neighbouring column is open air at the water line and below:
-                // that is the lip of the rim, not just a shallow bank.
-                if world.get(nx, WATER_LEVEL, nz) == AIR
-                    && world.get(nx, WATER_LEVEL - 1, nz) == AIR
-                    && world.get(nx, WATER_LEVEL - 3, nz) == AIR
-                {
-                    spills.push((nx, nz));
+        }
+    }
+
+    // Pour the stream off the edge. The fall is cut short rather than run to the
+    // bottom of the world: water thinning out into the void reads better than
+    // water hitting an invisible floor.
+    if let Some((x, z)) = spill {
+        let fall_bottom = (WATER_LEVEL - 15).max(1);
+        for (cx, cz) in [(x, z), (x + 1, z), (x, z + 1)] {
+            for y in (fall_bottom..=WATER_LEVEL).rev() {
+                if world.get(cx, y, cz) != AIR {
+                    break;
                 }
+                world.set(cx, y, cz, WATER);
             }
-        }
-    }
-    // The fall is cut short rather than run to the bottom of the world: a stream
-    // thinning out into the void reads better than one hitting an invisible floor.
-    let fall_bottom = (WATER_LEVEL - 15).max(0);
-    for (x, z) in spills {
-        for y in (fall_bottom..=WATER_LEVEL).rev() {
-            if world.get(x, y, z) != AIR {
-                break;
-            }
-            world.set(x, y, z, WATER);
         }
     }
 }
@@ -345,7 +351,13 @@ mod tests {
 
     #[test]
     fn there_is_water_and_it_spills_below_the_pond() {
-        let island = generate(9);
+        for seed in [1, 9, 77, 2024, 31337] {
+            check_water(seed);
+        }
+    }
+
+    fn check_water(seed: u32) {
+        let island = generate(seed);
         let mut water = 0;
         let mut falling = 0;
         for z in 0..SIZE as i32 {
@@ -360,8 +372,8 @@ mod tests {
                 }
             }
         }
-        assert!(water > 20, "expected a pond, found {water} water blocks");
-        assert!(falling > 0, "expected a waterfall over the rim");
+        assert!(water > 20, "seed {seed}: expected a pond, found {water} water blocks");
+        assert!(falling > 0, "seed {seed}: expected a waterfall over the rim");
     }
 
     #[test]

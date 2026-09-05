@@ -5,16 +5,19 @@
 //!   skyblock --render out/ -n 240  write an orbit as PNGs, no window
 //!   skyblock --bench 60            time N frames, no window, no I/O
 
+mod assets;
 mod blocks;
 mod camera;
 mod inflate;
 mod noise;
+mod material;
 mod math;
 mod output;
 mod pack;
 mod parallel;
 mod png;
 mod render;
+mod scene;
 mod terrain;
 mod texture;
 mod window;
@@ -29,6 +32,7 @@ use camera::Camera;
 use math::vec3;
 use output::{FileOutput, Framebuffer, NullOutput, Output};
 use render::Renderer;
+use scene::Scene;
 use window::WindowOutput;
 use world::World;
 
@@ -129,6 +133,13 @@ usage: skyblock [--window | --render DIR | --bench N] [--frames N] [--width W] [
   --check-pack     decode textures from the resource pack and report findings
   --dump NAME OUT  decode one pack entry and write its raw RGBA bytes";
 
+/// Load the resource pack and build the scene, with a clear message when the pack
+/// is missing: it is not committed to the repository.
+fn load_scene(seed: u32) -> io::Result<Scene> {
+    let pack = pack::Pack::open(None).map_err(io::Error::other)?;
+    Scene::load(seed, &pack).map_err(io::Error::other)
+}
+
 fn scene_camera(world: &World) -> Camera {
     // Aim a little above the middle of the terrain, where the island sits.
     let center = vec3(
@@ -140,8 +151,8 @@ fn scene_camera(world: &World) -> Camera {
 }
 
 fn run_headless(mut out: Box<dyn Output>, args: &Args, report: bool) -> io::Result<()> {
-    let mut island = terrain::generate(args.seed);
-    let mut camera = scene_camera(&island.world);
+    let mut scene = load_scene(args.seed)?;
+    let mut camera = scene_camera(scene.world());
     let mut frame = Framebuffer::new(args.width, args.height);
     let mut renderer = Renderer::new();
     if let Some(threads) = args.threads {
@@ -153,7 +164,8 @@ fn run_headless(mut out: Box<dyn Output>, args: &Args, report: bool) -> io::Resu
     loop {
         // A full turn over the requested frame count, so --render yields a loop.
         camera.yaw = std::f32::consts::TAU * rendered as f32 / args.frames.max(1) as f32;
-        renderer.render(&mut frame, &island.world, &camera);
+        renderer.render(&mut frame, &scene, &camera);
+        scene.tick += 1;
         rendered += 1;
         if !out.present(&frame)? {
             break;
@@ -173,8 +185,8 @@ fn run_headless(mut out: Box<dyn Output>, args: &Args, report: bool) -> io::Resu
 }
 
 fn run_window(args: &Args) -> io::Result<()> {
-    let mut island = terrain::generate(args.seed);
-    let mut camera = scene_camera(&island.world);
+    let mut scene = load_scene(args.seed)?;
+    let mut camera = scene_camera(scene.world());
     let mut win = WindowOutput::new("Skyblock Diorama", args.width, args.height)?;
     let mut frame = Framebuffer::new(args.width, args.height);
     let mut renderer = Renderer::new();
@@ -190,8 +202,12 @@ fn run_window(args: &Args) -> io::Result<()> {
         camera.apply(input.orbit, input.zoom);
 
         if input.reseed {
-            let seed = island.seed.wrapping_mul(1664525).wrapping_add(1013904223);
-            island = terrain::generate(seed);
+            let seed = scene
+                .island
+                .seed
+                .wrapping_mul(1664525)
+                .wrapping_add(1013904223);
+            scene.reseed(seed);
             println!("regenerated terrain with seed {seed}");
         }
         if let Some(q) = input.quality {
@@ -202,7 +218,8 @@ fn run_window(args: &Args) -> io::Result<()> {
 
         let (w, h) = win.size();
         frame.resize(w, h);
-        renderer.render(&mut frame, &island.world, &camera);
+        renderer.render(&mut frame, &scene, &camera);
+        scene.tick += 1;
 
         if input.screenshot {
             let path = PathBuf::from(format!("screenshot_{shots:03}.png"));
