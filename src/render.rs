@@ -96,6 +96,16 @@ impl Renderer {
         self.samples = 0;
     }
 
+    /// Mark every pixel as changing again, without throwing the image away.
+    ///
+    /// Used when the light moves but the geometry does not: the day/night cycle
+    /// changes every pixel's brightness, so none of them may be skipped, but the
+    /// converged average is still the right starting point and keeps the
+    /// transition smooth instead of dropping back to a noisy frame.
+    pub fn mark_all_active(&mut self) {
+        self.active.iter_mut().for_each(|flag| *flag = true);
+    }
+
     /// Fold one jittered sample per pixel into the running average and show it.
     ///
     /// Called while the camera is still. Each pass offsets the ray inside the pixel
@@ -792,6 +802,26 @@ mod tests {
             "{far} of {} pixels drifted from the fully refreshed image",
             refined.pixels.len()
         );
+    }
+
+    #[test]
+    fn the_window_loop_never_leaves_black_holes() {
+        let Some(mut scene) = scene() else { return };
+        let camera = Camera::new(vec3(24.0, 34.0, 24.0), 80.0);
+        let mut frame = Framebuffer::new(120, 90);
+        let mut renderer = Renderer::new();
+
+        // Exactly what the window does every frame: ask for the current size, then
+        // refine. When `resize` cleared unconditionally, the pixels the refinement
+        // skipped stayed black and the image collapsed into scattered dots.
+        for _ in 0..SAMPLE_WINDOW + 30 {
+            frame.resize(120, 90);
+            renderer.accumulate(&mut frame, &scene, &camera);
+            scene.tick += 1;
+        }
+
+        let black = frame.pixels.iter().filter(|&&p| p == 0).count();
+        assert_eq!(black, 0, "{black} pixels were left unwritten");
     }
 
     #[test]

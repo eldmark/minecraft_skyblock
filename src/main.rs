@@ -321,7 +321,12 @@ fn run_window(args: &Args) -> io::Result<()> {
         // While the camera moves: drop resolution and re-render every frame.
         // Once it settles: full resolution, and keep folding in jittered samples
         // until the image converges, which is where the antialiasing comes from.
-        let moving = !input.is_idle() || resized || input.reseed || time_changed;
+        // A change of light is not a change of geometry: the picture stays, every
+        // pixel is simply re-shaded at full resolution and folded into the average.
+        if time_changed {
+            renderer.mark_all_active();
+        }
+        let moving = !input.is_idle() || resized || input.reseed;
         if moving {
             renderer.scale = quality.max(2);
             renderer.render(&mut frame, &scene, &camera);

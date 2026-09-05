@@ -25,13 +25,19 @@ impl Framebuffer {
         }
     }
 
+    /// Resize if the window changed, and only then clear.
+    ///
+    /// Clearing unconditionally used to be harmless because every frame rewrote
+    /// every pixel. It stopped being harmless once the refinement pass began
+    /// skipping pixels that had not changed: the skipped ones were cleared to
+    /// black and never written back, leaving the image as a few scattered dots.
     pub fn resize(&mut self, width: usize, height: usize) {
         if width != self.width || height != self.height {
             self.width = width;
             self.height = height;
+            self.pixels.clear();
             self.pixels.resize(width * height, 0);
         }
-        self.pixels.fill(0);
     }
 
     pub fn to_rgb_bytes(&self) -> Vec<u8> {
@@ -103,5 +109,30 @@ impl Output for NullOutput {
     fn present(&mut self, _frame: &Framebuffer) -> io::Result<bool> {
         self.remaining = self.remaining.saturating_sub(1);
         Ok(self.remaining > 0)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resizing_to_the_same_size_keeps_the_image() {
+        let mut frame = Framebuffer::new(8, 4);
+        frame.pixels.fill(0x00FF00);
+        frame.resize(8, 4);
+        assert!(
+            frame.pixels.iter().all(|&p| p == 0x00FF00),
+            "a same-size resize must not clear the framebuffer"
+        );
+    }
+
+    #[test]
+    fn resizing_to_a_new_size_starts_clean() {
+        let mut frame = Framebuffer::new(8, 4);
+        frame.pixels.fill(0x00FF00);
+        frame.resize(9, 4);
+        assert_eq!(frame.pixels.len(), 36);
+        assert!(frame.pixels.iter().all(|&p| p == 0));
     }
 }

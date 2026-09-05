@@ -23,7 +23,8 @@ const RUIN: (i32, i32) = (13, 38);
 
 pub fn place_all(island: &mut Island) {
     let base = level(island, TEMPLE.0, TEMPLE.1, TEMPLE_W, TEMPLE_D, 1);
-    temple(island, TEMPLE.0, TEMPLE.1, base);
+    let ridge = temple(island, TEMPLE.0, TEMPLE.1, base);
+    dragon(island, TEMPLE.0 + TEMPLE_W / 2, TEMPLE.1 + TEMPLE_D / 2, ridge + 1);
     great_tree(island);
     bridge(island);
     ruin(island);
@@ -73,7 +74,9 @@ fn level(island: &mut Island, x0: i32, z0: i32, w: i32, d: i32, margin: i32) -> 
 
 /// The temple: stepped stylobate, a colonnade, entablature, a stepped pediment
 /// roof, and the crystal gate glowing in the cella behind the columns.
-fn temple(island: &mut Island, x0: i32, z0: i32, base: i32) {
+///
+/// Returns the height of the roof ridge, which is where the dragon perches.
+fn temple(island: &mut Island, x0: i32, z0: i32, base: i32) -> i32 {
     let world = &mut island.world;
     let (w, d) = (TEMPLE_W, TEMPLE_D);
     let (x1, z1) = (x0 + w - 1, z0 + d - 1);
@@ -190,6 +193,132 @@ fn temple(island: &mut Island, x0: i32, z0: i32, base: i32) {
     for x in gx0..=gx1 {
         world.set(x, floor - 1, z1 - 2, GLOWSTONE);
         world.set(x, floor, z1 - 2, GLASS);
+    }
+
+    column_top + 2 + courses
+}
+
+/// A dragon crouched along the temple's ridge, built out of blocks.
+///
+/// Gold for the body, so it catches the sun and the lantern light through its
+/// reflective material, and glowstone eyes, which are the only part of it left
+/// after dark.
+///
+/// Two things decide whether it reads as an animal at this scale. It lies **across**
+/// the temple, along x, so the default view sees its whole profile — head, neck,
+/// back, tail — instead of looking down its axis, where an earlier version turned
+/// into a totem pole. And every limb is a small solid box rather than a line of
+/// single blocks, because one block thick reads as a stick, not as a wing.
+fn dragon(island: &mut Island, cx: i32, cz: i32, y: i32) {
+    let world = &mut island.world;
+
+    fn box_of(world: &mut World, from: (i32, i32, i32), to: (i32, i32, i32), block: Block) {
+        for yy in from.1..=to.1 {
+            for zz in from.2..=to.2 {
+                for xx in from.0..=to.0 {
+                    world.set(xx, yy, zz, block);
+                }
+            }
+        }
+    }
+
+    // Body: three deep and two tall, running along the ridge and sagging in the
+    // middle so it reads as an animal lying down rather than a beam.
+    let body_start = cx - 3;
+    let body_len = 8;
+    for i in 0..body_len {
+        let x = body_start + i;
+        let sag = if (3..6).contains(&i) { -1 } else { 0 };
+        let half = if i < body_len - 2 { 1 } else { 0 };
+        box_of(
+            world,
+            (x, y + sag, cz - half),
+            (x, y + sag + 1, cz + half),
+            GOLD_BLOCK,
+        );
+    }
+
+    // Tail: continues past the body, dropping and thinning to a single block, with
+    // a slight curve so it does not leave the silhouette in a straight line.
+    let tail_x = body_start + body_len;
+    for step in 0..5 {
+        let x = tail_x + step;
+        let drop = y - 1 - step / 2;
+        let curve = (step / 3) as i32;
+        world.set(x, drop, cz + curve, GOLD_BLOCK);
+        if step < 2 {
+            world.set(x, drop, cz - 1, GOLD_BLOCK);
+        }
+    }
+
+    // Neck: two thick, leaning out over the entrance and rising gently.
+    let mut neck_y = y + 1;
+    for step in 0..3 {
+        let x = body_start - 1 - step;
+        neck_y += step % 2;
+        box_of(world, (x, neck_y, cz - 1), (x, neck_y + 1, cz), GOLD_BLOCK);
+    }
+
+    // Head: a blunt wedge with a snout, turned slightly towards the viewer.
+    let head_x = body_start - 4;
+    let head_y = neck_y + 1;
+    box_of(
+        world,
+        (head_x - 2, head_y, cz - 1),
+        (head_x, head_y + 1, cz + 1),
+        GOLD_BLOCK,
+    );
+    // Snout reaching further out and down.
+    box_of(
+        world,
+        (head_x - 4, head_y, cz),
+        (head_x - 3, head_y, cz + 1),
+        GOLD_BLOCK,
+    );
+    // Eyes on both cheeks: the only part of the dragon left after dark.
+    world.set(head_x - 1, head_y + 1, cz - 1, GLOWSTONE);
+    world.set(head_x - 1, head_y + 1, cz + 1, GLOWSTONE);
+    // Horns sweeping back over the neck.
+    for step in 0..2 {
+        world.set(head_x + step, head_y + 2, cz - 1, GOLD_BLOCK);
+        world.set(head_x + step, head_y + 2, cz + 1, GOLD_BLOCK);
+    }
+
+    // Wings: solid membranes spreading to both sides of the back, deep at the
+    // shoulder and tapering, each step rising and reaching further out.
+    for side in [-1i32, 1] {
+        let shoulder = body_start + 1;
+        for step in 1..=5 {
+            let z = cz + side * (1 + step);
+            // Wings rise a block per step: raised wings read as a creature about
+            // to take off, a flat spread reads as a table.
+            let lift = y + 1 + step;
+            let reach = match step {
+                1 | 2 => 3,
+                3 => 2,
+                _ => 1,
+            };
+            box_of(
+                world,
+                (shoulder - 1, lift, z),
+                (shoulder + reach, lift, z),
+                GOLD_BLOCK,
+            );
+            // A course under the leading edge gives the wing thickness, and the
+            // membrane hangs one block below between the ribs.
+            if step <= 3 {
+                world.set(shoulder - 1, lift - 1, z, GOLD_BLOCK);
+                world.set(shoulder + reach, lift - 1, z, GOLD_BLOCK);
+            }
+        }
+        // Shoulder joint and foreleg gripping the ridge.
+        box_of(
+            world,
+            (shoulder, y, cz + side * 2),
+            (shoulder + 1, y + 1, cz + side * 2),
+            GOLD_BLOCK,
+        );
+        world.set(shoulder + 1, y - 1, cz + side * 2, GOLD_BLOCK);
     }
 }
 
@@ -514,6 +643,8 @@ mod tests {
             assert!(count(w, GLASS) >= 3, "seed {seed}: no lit threshold");
             assert!(count(w, STONE_BRICKS) > 20, "seed {seed}: no bridge or ruin");
             assert!(count(w, OAK_LOG) > 40, "seed {seed}: no great tree");
+            // The dragon is by far the biggest gold structure in the scene.
+            assert!(count(w, GOLD_BLOCK) > 40, "seed {seed}: no dragon");
         }
     }
 
@@ -586,6 +717,43 @@ mod tests {
             }
         }
         assert!(top - ground >= 11, "the great tree is only {} tall", top - ground);
+    }
+
+    #[test]
+    fn the_dragon_perches_above_the_temple_roof() {
+        let island = built(2024);
+        let cx = TEMPLE.0 + TEMPLE_W / 2;
+
+        // Find the temple roof under the dragon, then the gold above it.
+        let mut roof = 0;
+        let mut dragon_top = 0;
+        for y in 0..island.world.size[1] as i32 {
+            for z in TEMPLE.1..TEMPLE.1 + TEMPLE_D {
+                match island.world.get(cx, y, z) {
+                    QUARTZ | QUARTZ_BRICKS => roof = roof.max(y),
+                    GOLD_BLOCK => dragon_top = dragon_top.max(y),
+                    _ => {}
+                }
+            }
+        }
+        assert!(
+            dragon_top > roof,
+            "the dragon ({dragon_top}) should sit above the roof ({roof})"
+        );
+
+        // It has lit eyes, somewhere above the roof: the head sits out over the
+        // entrance, so the search covers the whole temple footprint.
+        let mut eyes = Vec::new();
+        for y in roof..island.world.size[1] as i32 {
+            for z in TEMPLE.1 - 2..TEMPLE.1 + TEMPLE_D + 2 {
+                for x in TEMPLE.0 - 6..=TEMPLE.0 + TEMPLE_W + 2 {
+                    if island.world.get(x, y, z) == GLOWSTONE {
+                        eyes.push((x, y, z));
+                    }
+                }
+            }
+        }
+        assert!(eyes.len() >= 2, "the dragon has no eyes: {eyes:?}");
     }
 
     #[test]

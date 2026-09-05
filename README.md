@@ -27,7 +27,7 @@ cargo run --release -- --render out/ -n 240 --samples 8   # órbita a PNGs, sin 
 cargo run --release -- --bench 30                # medición de ms/frame
 cargo run --release -- --bench-idle 60           # medición del frame en reposo
 cargo run --release -- --check-pack              # verifica la carga del texture pack
-cargo test --release                             # 97 pruebas
+cargo test --release                             # 101 pruebas
 ```
 
 Opciones: `--width W --height H --seed N --threads N --samples N --sky-panorama
@@ -86,7 +86,8 @@ El programa lee las texturas directamente del ZIP con su propio DEFLATE.
 ## La escena
 
 Siguiendo el diorama de referencia: isla flotante con un **templo de columnas** y su
-puerta de cristal iluminada, un **gran árbol** sobre un afloramiento rocoso, un **río**
+puerta de cristal iluminada, un **dragón de bloques de oro** posado en la cumbrera con
+ojos de glowstone, un **gran árbol** sobre un afloramiento rocoso, un **río**
 que cruza la isla y cae por los dos bordes, un **puente de piedra** con linternas, y
 una **ruina** de columnas rotas en primer plano. Debajo, vetas de oro, hierro y
 diamante que solo se ven al orbitar por abajo.
@@ -99,7 +100,7 @@ Escena completa (isla 48×48), 900×600, CPU de 8 núcleos / 16 hilos:
 |---|---|---|---|
 | 1 | 239.85 | 4.2 | 1.00× |
 | 4 | 63.92 | 15.6 | 3.75× |
-| 16 | 28.07 | 35.6 | **8.55×** |
+| 16 | 27.03 | 37.0 | **8.55×** |
 
 Optimizaciones aplicadas, cada una medida a 640×520 con 16 hilos:
 
@@ -124,6 +125,9 @@ Frames en reposo (cámara quieta, refinando), 640×520 con 16 hilos:
 |---|---|---|
 | Antes | 18.5 | 100% |
 | Con refresco selectivo | **10.0** | 37% |
+
+Un cambio de hora no reinicia nada: marca todos los píxeles como activos y re-sombrea
+a resolución plena sobre la imagen que ya había, así el ciclo se ve como un fundido.
 
 Reproducible con `--bench N` y `--bench-idle N`, más `--width W --height H
 --threads N [--cycle]`.
