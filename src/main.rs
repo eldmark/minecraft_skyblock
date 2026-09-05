@@ -18,6 +18,7 @@ mod parallel;
 mod png;
 mod render;
 mod scene;
+mod skybox;
 mod terrain;
 mod texture;
 mod window;
@@ -52,6 +53,8 @@ struct Args {
     /// Override the worker count; used to measure scaling.
     threads: Option<usize>,
     seed: u32,
+    /// Use the pack's panorama cubemap instead of the procedural dusk sky.
+    panorama_sky: bool,
 }
 
 impl Args {
@@ -63,6 +66,7 @@ impl Args {
             frames: 240,
             threads: None,
             seed: 2024,
+            panorama_sky: false,
         };
         let mut argv = std::env::args().skip(1);
         while let Some(arg) = argv.next() {
@@ -96,6 +100,7 @@ impl Args {
                         args.seed = n;
                     }
                 }
+                "--sky-panorama" => args.panorama_sky = true,
                 "--threads" => args.threads = argv.next().and_then(|v| v.parse().ok()),
                 "--width" => {
                     if let Some(n) = argv.next().and_then(|v| v.parse().ok()) {
@@ -130,14 +135,15 @@ usage: skyblock [--window | --render DIR | --bench N] [--frames N] [--width W] [
   --bench N        render N frames and report ms/frame
   --threads N      force the worker count (default: all cores)
   --seed N         terrain seed (R reseeds in the window)
+  --sky-panorama   use the pack's panorama cubemap instead of the dusk sky
   --check-pack     decode textures from the resource pack and report findings
   --dump NAME OUT  decode one pack entry and write its raw RGBA bytes";
 
 /// Load the resource pack and build the scene, with a clear message when the pack
 /// is missing: it is not committed to the repository.
-fn load_scene(seed: u32) -> io::Result<Scene> {
+fn load_scene(seed: u32, panorama_sky: bool) -> io::Result<Scene> {
     let pack = pack::Pack::open(None).map_err(io::Error::other)?;
-    Scene::load(seed, &pack).map_err(io::Error::other)
+    Scene::load(seed, &pack, panorama_sky).map_err(io::Error::other)
 }
 
 fn scene_camera(world: &World) -> Camera {
@@ -151,7 +157,7 @@ fn scene_camera(world: &World) -> Camera {
 }
 
 fn run_headless(mut out: Box<dyn Output>, args: &Args, report: bool) -> io::Result<()> {
-    let mut scene = load_scene(args.seed)?;
+    let mut scene = load_scene(args.seed, args.panorama_sky)?;
     let mut camera = scene_camera(scene.world());
     let mut frame = Framebuffer::new(args.width, args.height);
     let mut renderer = Renderer::new();
@@ -185,7 +191,7 @@ fn run_headless(mut out: Box<dyn Output>, args: &Args, report: bool) -> io::Resu
 }
 
 fn run_window(args: &Args) -> io::Result<()> {
-    let mut scene = load_scene(args.seed)?;
+    let mut scene = load_scene(args.seed, args.panorama_sky)?;
     let mut camera = scene_camera(scene.world());
     let mut win = WindowOutput::new("Skyblock Diorama", args.width, args.height)?;
     let mut frame = Framebuffer::new(args.width, args.height);

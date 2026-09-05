@@ -84,11 +84,6 @@ fn render_into(
     });
 }
 
-pub fn sky_color(dir: Vec3) -> Vec3 {
-    let t = (dir.y * 0.5 + 0.5).clamp(0.0, 1.0);
-    vec3(0.94, 0.62, 0.42).lerp(vec3(0.10, 0.16, 0.38), t.powf(0.7))
-}
-
 /// First visible surface along a ray, skipping texels the texture marks as fully
 /// transparent (leaf cutouts) so foliage does not read as solid cubes.
 fn first_visible_hit(scene: &Scene, ray: &Ray) -> Option<(Hit, Vec3)> {
@@ -189,7 +184,7 @@ pub fn trace_color(scene: &Scene, ray: &Ray) -> Vec3 {
             let normal = shaded_normal(scene, &hit, frame);
             direct_light(scene, &hit, normal, albedo, ray.dir)
         }
-        None => sky_color(ray.dir),
+        None => scene.skybox.sample(ray.dir),
     }
 }
 
@@ -204,7 +199,7 @@ mod tests {
         if !Path::new("texturepack").is_dir() {
             return None;
         }
-        Scene::load(2024, &Pack::open(None).ok()?).ok()
+        Scene::load(2024, &Pack::open(None).ok()?, false).ok()
     }
 
     #[test]
