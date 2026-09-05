@@ -120,23 +120,44 @@ pub fn place_shrine(island: &mut Island) {
     }
 }
 
-/// Every emissive block in the world, as light positions at block centers.
+/// Emissive blocks, merged into clusters.
+///
+/// Neighbouring emitters (the three glowstone blocks behind the gate, the gate's
+/// own twelve crystal blocks) are indistinguishable once their light lands on a
+/// surface, so they are merged into one light at their centroid. Fewer lights means
+/// fewer shadow rays per shaded point, which is the dominant cost.
 pub fn collect_lights(world: &World) -> Vec<(crate::math::Vec3, Block)> {
-    let mut lights = Vec::new();
+    use crate::math::vec3;
+
+    let mut raw: Vec<(crate::math::Vec3, Block)> = Vec::new();
     for y in 0..world.size[1] as i32 {
         for z in 0..world.size[2] as i32 {
             for x in 0..world.size[0] as i32 {
                 let block = world.get(x, y, z);
                 if is_emissive(block) {
-                    lights.push((
-                        crate::math::vec3(x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5),
-                        block,
-                    ));
+                    raw.push((vec3(x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5), block));
                 }
             }
         }
     }
-    lights
+
+    /// Emitters closer than this to a cluster's centre join it.
+    const MERGE_RADIUS: f32 = 2.6;
+    let mut clusters: Vec<(crate::math::Vec3, Block, f32)> = Vec::new();
+    for (position, block) in raw {
+        match clusters
+            .iter_mut()
+            .find(|(centre, kind, _)| *kind == block && (*centre - position).length() < MERGE_RADIUS)
+        {
+            Some((centre, _, count)) => {
+                // Running mean, so the cluster sits at the centroid of its blocks.
+                *count += 1.0;
+                *centre = *centre + (position - *centre) / *count;
+            }
+            None => clusters.push((position, block, 1.0)),
+        }
+    }
+    clusters.into_iter().map(|(p, b, _)| (p, b)).collect()
 }
 
 #[cfg(test)]
@@ -194,15 +215,34 @@ mod tests {
     }
 
     #[test]
-    fn lights_are_collected_from_emissive_blocks() {
+    fn lights_are_clustered_but_still_cover_every_lantern() {
         let mut island = terrain::generate(3);
         place_shrine(&mut island);
         let lights = collect_lights(&island.world);
-        assert_eq!(
-            lights.len(),
-            count(&island.world, GLOWSTONE) + count(&island.world, PORTAL)
-        );
-        assert!(lights.iter().all(|(p, _)| p.x.fract() == 0.5));
+        let emitters = count(&island.world, GLOWSTONE) + count(&island.world, PORTAL);
+
+        assert!(lights.len() < emitters, "clustering did nothing");
+        // Four corner lanterns are far apart, so they can never merge together.
+        assert!(lights.len() >= 5, "clusters collapsed too far: {}", lights.len());
+
+        // Every emissive block must have a cluster near it.
+        for y in 0..island.world.size[1] as i32 {
+            for z in 0..island.world.size[2] as i32 {
+                for x in 0..island.world.size[0] as i32 {
+                    let block = island.world.get(x, y, z);
+                    if !is_emissive(block) {
+                        continue;
+                    }
+                    let p = crate::math::vec3(x as f32 + 0.5, y as f32 + 0.5, z as f32 + 0.5);
+                    assert!(
+                        lights
+                            .iter()
+                            .any(|(c, b)| *b == block && (*c - p).length() < 3.0),
+                        "emitter at {x},{y},{z} has no cluster"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

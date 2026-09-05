@@ -56,6 +56,8 @@ struct Args {
     seed: u32,
     /// Use the pack's panorama cubemap instead of the procedural dusk sky.
     panorama_sky: bool,
+    /// Jittered samples per frame for offline rendering.
+    samples: usize,
 }
 
 impl Args {
@@ -68,6 +70,7 @@ impl Args {
             threads: None,
             seed: 2024,
             panorama_sky: false,
+            samples: 1,
         };
         let mut argv = std::env::args().skip(1);
         while let Some(arg) = argv.next() {
@@ -102,6 +105,11 @@ impl Args {
                     }
                 }
                 "--sky-panorama" => args.panorama_sky = true,
+                "--samples" => {
+                    if let Some(n) = argv.next().and_then(|v| v.parse().ok()) {
+                        args.samples = n;
+                    }
+                }
                 "--threads" => args.threads = argv.next().and_then(|v| v.parse().ok()),
                 "--width" => {
                     if let Some(n) = argv.next().and_then(|v| v.parse().ok()) {
@@ -137,6 +145,7 @@ usage: skyblock [--window | --render DIR | --bench N] [--frames N] [--width W] [
   --threads N      force the worker count (default: all cores)
   --seed N         terrain seed (R reseeds in the window)
   --sky-panorama   use the pack's panorama cubemap instead of the dusk sky
+  --samples N      jittered samples per offline frame (antialiasing)
   --check-pack     decode textures from the resource pack and report findings
   --dump NAME OUT  decode one pack entry and write its raw RGBA bytes";
 
@@ -171,7 +180,15 @@ fn run_headless(mut out: Box<dyn Output>, args: &Args, report: bool) -> io::Resu
     loop {
         // A full turn over the requested frame count, so --render yields a loop.
         camera.yaw = std::f32::consts::TAU * rendered as f32 / args.frames.max(1) as f32;
-        renderer.render(&mut frame, &scene, &camera);
+        if args.samples <= 1 {
+            renderer.render(&mut frame, &scene, &camera);
+        } else {
+            // Offline frames get antialiasing: several jittered samples averaged.
+            renderer.reset_accumulation();
+            for _ in 0..args.samples {
+                renderer.accumulate(&mut frame, &scene, &camera);
+            }
+        }
         scene.tick += 1;
         rendered += 1;
         if !out.present(&frame)? {
@@ -220,13 +237,30 @@ fn run_window(args: &Args) -> io::Result<()> {
         if let Some(q) = input.quality {
             quality = q;
         }
-        // Drop resolution while the camera moves, restore it the moment it stops.
-        renderer.scale = if input.is_idle() { quality } else { quality.max(2) };
-
         let (w, h) = win.size();
+        let resized = w != frame.width || h != frame.height;
         frame.resize(w, h);
-        renderer.render(&mut frame, &scene, &camera);
-        scene.tick += 1;
+
+        // While the camera moves: drop resolution and re-render every frame.
+        // Once it settles: full resolution, and keep folding in jittered samples
+        // until the image converges, which is where the antialiasing comes from.
+        let moving = !input.is_idle() || resized || input.reseed;
+        if moving {
+            renderer.scale = quality.max(2);
+            renderer.render(&mut frame, &scene, &camera);
+            renderer.reset_accumulation();
+            scene.tick += 1;
+        } else {
+            renderer.scale = quality;
+            if renderer.is_converged() {
+                // Converged: only redraw to advance water and portal animation.
+                renderer.render(&mut frame, &scene, &camera);
+                renderer.reset_accumulation();
+                scene.tick += 1;
+            } else {
+                renderer.accumulate(&mut frame, &scene, &camera);
+            }
+        }
 
         if input.screenshot {
             let path = PathBuf::from(format!("screenshot_{shots:03}.png"));
@@ -237,10 +271,11 @@ fn run_window(args: &Args) -> io::Result<()> {
 
         let ms = frame_start.elapsed().as_secs_f64() * 1000.0;
         win.set_status(&format!(
-            "{ms:.1} ms  {:.0} fps  {w}x{h}/{}  {} threads  dist {:.0}",
+            "{ms:.1} ms  {:.0} fps  {w}x{h}/{}  {} threads  {} spp  dist {:.0}",
             1000.0 / ms.max(0.001),
             renderer.scale,
             renderer.threads,
+            renderer.samples.max(1),
             camera.distance
         ));
         if !win.present(&frame)? {

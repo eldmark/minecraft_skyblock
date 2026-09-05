@@ -10,6 +10,8 @@ use crate::material::{f0_from_ior, Material};
 use crate::math::{fresnel_schlick, to_srgb_u32, vec3, Vec3};
 use crate::output::Framebuffer;
 use crate::parallel::{render_strips, thread_count};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 use crate::scene::Scene;
 use crate::world::{Face, Hit, Ray, World};
 
@@ -22,17 +24,30 @@ const MAX_ALPHA_SKIPS: usize = 6;
 /// Reflection and refraction recursion budget. Four is enough for water over
 /// stone with the sky in it; deeper bounces cost frames and change nothing.
 const MAX_DEPTH: usize = 4;
+/// Past this depth a transparent surface follows only its dominant branch instead
+/// of splitting into both. Splitting at every level doubles the ray count per
+/// bounce, and by the second bounce the weaker branch is no longer visible.
+const SPLIT_DEPTH: usize = 1;
 /// A bounce contributing less than this is dropped.
 const MIN_CONTRIBUTION: f32 = 0.015;
 /// Point lights farther than this are ignored, and only the nearest few are shaded.
 const LIGHT_RANGE: f32 = 15.0;
 const MAX_LIGHTS_PER_HIT: usize = 3;
+/// A lantern contributing less than this is skipped before its shadow ray.
+const MIN_LIGHT_CONTRIBUTION: f32 = 0.012;
+
+/// Jittered samples accumulated once the camera stops moving. Past this the image
+/// stops changing visibly.
+pub const MAX_SAMPLES: usize = 16;
 
 pub struct Renderer {
     pub threads: usize,
     /// 1 = full resolution, 2 = half, and so on. Raised while the camera moves.
     pub scale: usize,
     low: Vec<u32>,
+    /// Running sum of samples per pixel, for progressive refinement while idle.
+    accumulator: Vec<Vec3>,
+    pub samples: usize,
 }
 
 impl Default for Renderer {
@@ -47,10 +62,64 @@ impl Renderer {
             threads: thread_count(),
             scale: 1,
             low: Vec::new(),
+            accumulator: Vec::new(),
+            samples: 0,
         }
     }
 
+    /// Drop the accumulated samples: the image is about to change.
+    pub fn reset_accumulation(&mut self) {
+        self.samples = 0;
+    }
+
+    /// True once the accumulator has nothing left to add.
+    pub fn is_converged(&self) -> bool {
+        self.samples >= MAX_SAMPLES
+    }
+
+    /// Add one jittered sample per pixel and show the running average.
+    ///
+    /// Called only while the camera is still. Each pass offsets the ray inside the
+    /// pixel with a different low-discrepancy offset, so edges resolve into smooth
+    /// gradients without ever tracing more than one ray per pixel per frame.
+    pub fn accumulate(&mut self, frame: &mut Framebuffer, scene: &Scene, camera: &Camera) {
+        let (w, h) = (frame.width, frame.height);
+        if self.accumulator.len() != w * h || self.samples == 0 {
+            self.accumulator.clear();
+            self.accumulator.resize(w * h, Vec3::ZERO);
+            self.samples = 0;
+        }
+        if self.samples >= MAX_SAMPLES {
+            return;
+        }
+
+        let jitter = halton_2d(self.samples + 1);
+        let threads = self.threads;
+        let previous = self.samples as f32;
+        let inv = 1.0 / (previous + 1.0);
+
+        // The accumulator is striped exactly like the framebuffer, so a worker owns
+        // the same rows in both and no locking is needed.
+        let accumulator = &mut self.accumulator;
+        let mut pairs: Vec<(&mut [Vec3], &mut [u32])> = accumulator
+            .chunks_mut(w * ROWS_PER_STRIP)
+            .zip(frame.pixels.chunks_mut(w * ROWS_PER_STRIP))
+            .collect();
+
+        run_strips(&mut pairs, threads, |sums, pixels, first_row| {
+            for (i, sum) in sums.iter_mut().enumerate() {
+                let y = first_row + i / w;
+                let x = i % w;
+                let ray = camera.ray(x, y, w, h, jitter);
+                *sum += trace_color(scene, &ray);
+                pixels[i] = to_srgb_u32(*sum * inv);
+            }
+        });
+        self.samples += 1;
+    }
+
     pub fn render(&mut self, frame: &mut Framebuffer, scene: &Scene, camera: &Camera) {
+        self.samples = 0;
         let scale = self.scale.max(1);
         let (w, h) = (frame.width, frame.height);
         let (lw, lh) = ((w / scale).max(1), (h / scale).max(1));
@@ -73,6 +142,59 @@ impl Renderer {
             }
         }
     }
+}
+
+/// Halton sequence in base 2 and 3: sample offsets that fill the pixel evenly
+/// instead of clumping the way random offsets do at low counts.
+fn halton_2d(index: usize) -> (f32, f32) {
+    fn halton(mut i: usize, base: usize) -> f32 {
+        let (mut f, mut result) = (1.0f32, 0.0f32);
+        while i > 0 {
+            f /= base as f32;
+            result += f * (i % base) as f32;
+            i /= base;
+        }
+        result
+    }
+    (halton(index, 2), halton(index, 3))
+}
+
+/// Hand paired strips (accumulator sums and framebuffer pixels) to the worker
+/// pool. Same dynamic queue as `render_strips`, but carrying two buffers at once.
+fn run_strips<F>(items: &mut [(&mut [Vec3], &mut [u32])], threads: usize, render: F)
+where
+    F: Fn(&mut [Vec3], &mut [u32], usize) + Sync,
+{
+    if threads <= 1 || items.len() <= 1 {
+        for (index, (sums, pixels)) in items.iter_mut().enumerate() {
+            render(sums, pixels, index * ROWS_PER_STRIP);
+        }
+        return;
+    }
+
+    let next = AtomicUsize::new(0);
+    let count = items.len();
+    let queue = Mutex::new(items);
+    let render = &render;
+
+    std::thread::scope(|scope| {
+        for _ in 0..threads {
+            scope.spawn(|| loop {
+                let index = next.fetch_add(1, Ordering::Relaxed);
+                if index >= count {
+                    break;
+                }
+                // Swap the slices out of the queue so the borrow travels with the
+                // worker: each index is claimed once, so nothing is aliased.
+                let (mut sums, mut pixels) = {
+                    let mut guard = queue.lock().unwrap();
+                    let (sums, pixels) = &mut guard[index];
+                    (std::mem::take(sums), std::mem::take(pixels))
+                };
+                render(&mut sums, &mut pixels, index * ROWS_PER_STRIP);
+            });
+        }
+    });
 }
 
 fn render_into(
@@ -167,17 +289,22 @@ fn shaded_normal(scene: &Scene, hit: &Hit, frame: usize) -> Vec3 {
 /// Blinn-Phong direct lighting plus a hemispherical ambient term.
 fn direct_light(scene: &Scene, hit: &Hit, normal: Vec3, albedo: Vec3, view: Vec3) -> Vec3 {
     let material = scene.assets.material(hit.block);
-    let shadow = sun_visibility(scene, hit.point, hit.normal);
 
-    let n_dot_l = normal.dot(scene.sun_dir).max(0.0);
-    let diffuse = albedo.mul_elem(scene.sun_color) * (n_dot_l * shadow);
-
-    // Half-vector form: cheaper than reflecting the view, and just as convincing.
-    let half = (scene.sun_dir - view).normalized();
-    let spec_angle = normal.dot(half).max(0.0);
-    let lit = if n_dot_l > 0.0 { 1.0 } else { 0.0 };
-    let specular =
-        scene.sun_color * (material.specular * spec_angle.powf(material.shininess) * shadow * lit);
+    // A surface turned away from the sun needs no shadow ray: the sun contributes
+    // nothing to it either way, and that skips a full grid traversal.
+    let n_dot_l = normal.dot(scene.sun_dir);
+    let (diffuse, specular) = if n_dot_l > 0.0 {
+        let shadow = sun_visibility(scene, hit.point, hit.normal);
+        // Half-vector form: cheaper than reflecting the view, just as convincing.
+        let half = (scene.sun_dir - view).normalized();
+        let spec_angle = normal.dot(half).max(0.0);
+        (
+            albedo.mul_elem(scene.sun_color) * (n_dot_l * shadow),
+            scene.sun_color * (material.specular * spec_angle.powf(material.shininess) * shadow),
+        )
+    } else {
+        (Vec3::ZERO, Vec3::ZERO)
+    };
 
     // Sky above, bounced ground light below: cheap fill that keeps shadows readable.
     let up = normal.y * 0.5 + 0.5;
@@ -225,6 +352,17 @@ fn point_lights(scene: &Scene, hit: &Hit, normal: Vec3, albedo: Vec3, view: Vec3
             continue;
         }
 
+        let light_material = scene.assets.material(block);
+        // Inverse-square falloff, softened near the source so lanterns do not blow
+        // out the blocks they sit on.
+        let attenuation = light_material.emission / (1.0 + 0.25 * d2);
+        // Decide the contribution before paying for a shadow ray: a lantern whose
+        // light would not register is not worth a grid traversal.
+        if attenuation * n_dot_l < MIN_LIGHT_CONTRIBUTION {
+            continue;
+        }
+        let color = vec3(1.0, 0.86, 0.62).mul_elem(light_material.tint);
+
         // Shadow ray stops short of the light block itself.
         let probe = Ray::new(hit.point + hit.normal * 1e-3, dir);
         let blocked = scene
@@ -236,13 +374,6 @@ fn point_lights(scene: &Scene, hit: &Hit, normal: Vec3, albedo: Vec3, view: Vec3
         if blocked {
             continue;
         }
-
-        let emission = scene.assets.material(block).emission;
-        // Inverse-square falloff, softened near the source so lanterns do not blow
-        // out the blocks they sit on.
-        let attenuation = emission / (1.0 + 0.25 * d2);
-        let tint = scene.assets.material(block).tint;
-        let color = vec3(1.0, 0.86, 0.62).mul_elem(tint);
 
         let half = (dir - view).normalized();
         let spec = material.specular * normal.dot(half).max(0.0).powf(material.shininess);
@@ -263,7 +394,16 @@ fn radiance(scene: &Scene, ray: &Ray, depth: usize, weight: f32) -> Vec3 {
     };
     let frame = scene.animation_frame(scene.assets.frame_count(hit.block, hit.face));
     let normal = shaded_normal(scene, &hit, frame);
-    let material = *scene.assets.material(hit.block);
+    let mut material = *scene.assets.material(hit.block);
+
+    // The gate's smoke modulates both what it lets through and how hard it glows.
+    let mut albedo = albedo;
+    if scene.is_portal(hit.block) {
+        let smoke = scene.portal_smoke(hit.point);
+        albedo = albedo * smoke;
+        material.emission *= smoke;
+        material.transparency = (material.transparency / smoke.max(0.5)).clamp(0.25, 0.92);
+    }
     let direct = direct_light(scene, &hit, normal, albedo, ray.dir);
 
     if depth >= MAX_DEPTH || weight < MIN_CONTRIBUTION {
@@ -304,18 +444,37 @@ fn transparent_shade(
     let fresnel = fresnel_schlick(cos_theta, f0_from_ior(material.ior))
         .max(material.reflectivity * (1.0 - cos_theta));
 
-    let reflected_dir = ray.dir.reflect(oriented);
-    let reflected = Ray::new(hit.point + oriented * 1e-3, reflected_dir);
-    let reflection = radiance(scene, &reflected, depth + 1, weight * fresnel);
+    let reflect_weight = weight * fresnel;
+    let refract_weight = weight * material.transparency * (1.0 - fresnel);
+    let split = depth < SPLIT_DEPTH;
+
+    let reflected = Ray::new(hit.point + oriented * 1e-3, ray.dir.reflect(oriented));
+    let refracted = ray
+        .dir
+        .refract(oriented, eta)
+        .map(|dir| Ray::new(hit.point - oriented * 1e-3, dir));
 
     // Total internal reflection: no transmitted ray exists, so all of it reflects.
-    let transmission = match ray.dir.refract(oriented, eta) {
-        Some(dir) => {
-            let through = Ray::new(hit.point - oriented * 1e-3, dir);
-            let w = weight * material.transparency * (1.0 - fresnel);
-            radiance(scene, &through, depth + 1, w).mul_elem(material.tint)
+    let (reflection, transmission) = match refracted {
+        None => {
+            let r = radiance(scene, &reflected, depth + 1, reflect_weight + refract_weight);
+            (r, r)
         }
-        None => reflection,
+        Some(through) if split || reflect_weight >= refract_weight => {
+            let r = radiance(scene, &reflected, depth + 1, reflect_weight);
+            let t = if split {
+                radiance(scene, &through, depth + 1, refract_weight).mul_elem(material.tint)
+            } else {
+                // Deep in the recursion the weaker branch reuses the stronger one's
+                // color rather than tracing a second ray for it.
+                r.mul_elem(material.tint)
+            };
+            (r, t)
+        }
+        Some(through) => {
+            let t = radiance(scene, &through, depth + 1, refract_weight).mul_elem(material.tint);
+            (t, t)
+        }
     };
 
     let opacity = 1.0 - material.transparency;
@@ -399,6 +558,62 @@ mod tests {
         let lit = trace_color(&scene, &top).max_component();
         let unlit = trace_color(&scene, &bottom).max_component();
         assert!(lit > unlit, "lit {lit} should exceed shadowed {unlit}");
+    }
+
+    #[test]
+    fn animated_textures_change_between_ticks() {
+        let Some(mut scene) = scene() else { return };
+        let camera = Camera::new(vec3(16.0, 24.0, 16.0), 45.0);
+        let mut a = Framebuffer::new(96, 72);
+        let mut b = Framebuffer::new(96, 72);
+        Renderer::new().render(&mut a, &scene, &camera);
+        // Far enough for the water strip to advance a frame and the smoke to drift.
+        scene.tick += 30;
+        Renderer::new().render(&mut b, &scene, &camera);
+        let changed = a
+            .pixels
+            .iter()
+            .zip(b.pixels.iter())
+            .filter(|(p, q)| p != q)
+            .count();
+        assert!(changed > 20, "only {changed} pixels animated");
+    }
+
+    #[test]
+    fn the_portal_smoke_varies_in_space_and_time() {
+        let Some(mut scene) = scene() else { return };
+        let p = vec3(16.3, 27.4, 15.6);
+        let q = vec3(16.3, 28.9, 15.6);
+        assert!((scene.portal_smoke(p) - scene.portal_smoke(q)).abs() > 0.01);
+        let before = scene.portal_smoke(p);
+        scene.tick += 60;
+        assert!((scene.portal_smoke(p) - before).abs() > 0.01);
+    }
+
+    #[test]
+    fn normal_mapping_perturbs_a_flat_face() {
+        let Some(scene) = scene() else { return };
+        // Look straight down at the shrine's quartz floor and gather the shaded
+        // normals across it: a normal-mapped surface must not return one constant.
+        let mut normals = std::collections::HashSet::new();
+        for i in 0..40 {
+            let x = 14.0 + i as f32 * 0.05;
+            let ray = Ray::new(vec3(x, 60.0, 16.0), vec3(0.0, -1.0, 0.0));
+            if let Some((hit, _)) = first_visible_hit(&scene, &ray) {
+                let frame = scene.animation_frame(scene.assets.frame_count(hit.block, hit.face));
+                let n = shaded_normal(&scene, &hit, frame);
+                normals.insert((
+                    (n.x * 1000.0) as i32,
+                    (n.y * 1000.0) as i32,
+                    (n.z * 1000.0) as i32,
+                ));
+            }
+        }
+        assert!(
+            normals.len() > 3,
+            "normal map produced {} distinct normals",
+            normals.len()
+        );
     }
 
     #[test]
