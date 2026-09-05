@@ -198,17 +198,17 @@ fn temple(island: &mut Island, x0: i32, z0: i32, base: i32) -> i32 {
     column_top + 2 + courses
 }
 
-/// A dragon crouched along the temple's ridge, built out of blocks.
+/// A dragon reared up on the temple's ridge, built out of blocks.
 ///
-/// Gold for the body, so it catches the sun and the lantern light through its
-/// reflective material, and glowstone eyes, which are the only part of it left
-/// after dark.
+/// Obsidian for the hide — dark volcanic glass, shiny enough that it picks up every
+/// lantern around the temple and the sunset behind it — with an emerald spine and
+/// belly, redstone in the jaw and glowstone eyes that carry it through the night.
 ///
-/// Two things decide whether it reads as an animal at this scale. It lies **across**
-/// the temple, along x, so the default view sees its whole profile — head, neck,
-/// back, tail — instead of looking down its axis, where an earlier version turned
-/// into a totem pole. And every limb is a small solid box rather than a line of
-/// single blocks, because one block thick reads as a stick, not as a wing.
+/// Two things decide whether it reads as an animal at this scale. It stands
+/// **across** the temple, along x, so the default view sees its whole profile;
+/// an earlier version aligned with the view axis read as a totem pole. And every
+/// part is a solid box, never a line of single blocks, which at this size looks
+/// like a stick rather than a limb.
 fn dragon(island: &mut Island, cx: i32, cz: i32, y: i32) {
     let world = &mut island.world;
 
@@ -222,103 +222,90 @@ fn dragon(island: &mut Island, cx: i32, cz: i32, y: i32) {
         }
     }
 
-    // Body: three deep and two tall, running along the ridge and sagging in the
-    // middle so it reads as an animal lying down rather than a beam.
-    let body_start = cx - 3;
-    let body_len = 8;
-    for i in 0..body_len {
-        let x = body_start + i;
-        let sag = if (3..6).contains(&i) { -1 } else { 0 };
-        let half = if i < body_len - 2 { 1 } else { 0 };
+    // Hind legs: thick, planted on the ridge, carrying the reared-up body.
+    for dz in [-1i32, 1] {
         box_of(
             world,
-            (x, y + sag, cz - half),
-            (x, y + sag + 1, cz + half),
-            GOLD_BLOCK,
+            (cx + 2, y, cz + dz),
+            (cx + 3, y + 2, cz + dz),
+            OBSIDIAN,
         );
+        // Foot.
+        world.set(cx + 1, y, cz + dz, OBSIDIAN);
     }
 
-    // Tail: continues past the body, dropping and thinning to a single block, with
-    // a slight curve so it does not leave the silhouette in a straight line.
-    let tail_x = body_start + body_len;
-    for step in 0..5 {
-        let x = tail_x + step;
-        let drop = y - 1 - step / 2;
-        let curve = (step / 3) as i32;
-        world.set(x, drop, cz + curve, GOLD_BLOCK);
-        if step < 2 {
-            world.set(x, drop, cz - 1, GOLD_BLOCK);
-        }
+    // Body: three deep, three tall, sloping up towards the chest.
+    box_of(world, (cx - 2, y + 2, cz - 1), (cx + 4, y + 4, cz + 1), OBSIDIAN);
+    // Belly plates.
+    box_of(world, (cx - 1, y + 2, cz - 1), (cx + 3, y + 2, cz + 1), EMERALD_BLOCK);
+    // Spine along the back.
+    box_of(world, (cx - 1, y + 5, cz), (cx + 3, y + 5, cz), EMERALD_BLOCK);
+
+    // Chest and shoulders, where the neck and the wings meet the body.
+    box_of(world, (cx - 4, y + 3, cz - 1), (cx - 2, y + 5, cz + 1), OBSIDIAN);
+
+    // Front legs, shorter, tucked under the chest.
+    for dz in [-1i32, 1] {
+        box_of(world, (cx - 3, y + 1, cz + dz), (cx - 3, y + 2, cz + dz), OBSIDIAN);
+        world.set(cx - 4, y + 1, cz + dz, OBSIDIAN);
     }
 
-    // Neck: two thick, leaning out over the entrance and rising gently.
-    let mut neck_y = y + 1;
+    // Neck: two thick, curving up and forward over the temple's entrance.
+    // The neck climbs more than it reaches: in the reference the head sits over
+    // the chest, not out in front of it.
+    let neck = [(cx - 5, y + 5), (cx - 6, y + 6), (cx - 6, y + 7)];
+    for (nx, ny) in neck {
+        box_of(world, (nx, ny, cz - 1), (nx, ny + 1, cz + 1), OBSIDIAN);
+        world.set(nx, ny + 2, cz, EMERALD_BLOCK); // crest running up the neck
+    }
+
+    // Head: a wedge with a jaw that opens forward and down.
+    let (hx, hy) = (cx - 8, y + 8);
+    box_of(world, (hx, hy, cz - 1), (hx + 2, hy + 1, cz + 1), OBSIDIAN);
+    // Snout.
+    box_of(world, (hx - 2, hy, cz - 1), (hx - 1, hy, cz + 1), OBSIDIAN);
+    // Open jaw, lit from inside.
+    box_of(world, (hx - 2, hy - 1, cz), (hx, hy - 1, cz), REDSTONE_BLOCK);
+    // Eyes on both cheeks: what is left of the dragon after dark.
+    world.set(hx + 1, hy + 1, cz - 1, GLOWSTONE);
+    world.set(hx + 1, hy + 1, cz + 1, GLOWSTONE);
+    // Horns sweeping back off the skull.
     for step in 0..3 {
-        let x = body_start - 1 - step;
-        neck_y += step % 2;
-        box_of(world, (x, neck_y, cz - 1), (x, neck_y + 1, cz), GOLD_BLOCK);
-    }
-
-    // Head: a blunt wedge with a snout, turned slightly towards the viewer.
-    let head_x = body_start - 4;
-    let head_y = neck_y + 1;
-    box_of(
-        world,
-        (head_x - 2, head_y, cz - 1),
-        (head_x, head_y + 1, cz + 1),
-        GOLD_BLOCK,
-    );
-    // Snout reaching further out and down.
-    box_of(
-        world,
-        (head_x - 4, head_y, cz),
-        (head_x - 3, head_y, cz + 1),
-        GOLD_BLOCK,
-    );
-    // Eyes on both cheeks: the only part of the dragon left after dark.
-    world.set(head_x - 1, head_y + 1, cz - 1, GLOWSTONE);
-    world.set(head_x - 1, head_y + 1, cz + 1, GLOWSTONE);
-    // Horns sweeping back over the neck.
-    for step in 0..2 {
-        world.set(head_x + step, head_y + 2, cz - 1, GOLD_BLOCK);
-        world.set(head_x + step, head_y + 2, cz + 1, GOLD_BLOCK);
-    }
-
-    // Wings: solid membranes spreading to both sides of the back, deep at the
-    // shoulder and tapering, each step rising and reaching further out.
-    for side in [-1i32, 1] {
-        let shoulder = body_start + 1;
-        for step in 1..=5 {
-            let z = cz + side * (1 + step);
-            // Wings rise a block per step: raised wings read as a creature about
-            // to take off, a flat spread reads as a table.
-            let lift = y + 1 + step;
-            let reach = match step {
-                1 | 2 => 3,
-                3 => 2,
-                _ => 1,
-            };
-            box_of(
-                world,
-                (shoulder - 1, lift, z),
-                (shoulder + reach, lift, z),
-                GOLD_BLOCK,
-            );
-            // A course under the leading edge gives the wing thickness, and the
-            // membrane hangs one block below between the ribs.
-            if step <= 3 {
-                world.set(shoulder - 1, lift - 1, z, GOLD_BLOCK);
-                world.set(shoulder + reach, lift - 1, z, GOLD_BLOCK);
-            }
+        for dz in [-1i32, 1] {
+            world.set(hx + 2 + step, hy + 2 + step / 2, cz + dz, OBSIDIAN);
         }
-        // Shoulder joint and foreleg gripping the ridge.
-        box_of(
-            world,
-            (shoulder, y, cz + side * 2),
-            (shoulder + 1, y + 1, cz + side * 2),
-            GOLD_BLOCK,
-        );
-        world.set(shoulder + 1, y - 1, cz + side * 2, GOLD_BLOCK);
+    }
+
+    // Tail: leaves the hips, drops, then sweeps up and back, thinning as it goes.
+    let tail = [
+        (cx + 5, y + 3, 1),
+        (cx + 6, y + 3, 1),
+        (cx + 7, y + 4, 0),
+        (cx + 8, y + 5, 0),
+        (cx + 9, y + 5, 0),
+    ];
+    for (tx, ty, half) in tail {
+        box_of(world, (tx, ty, cz - half), (tx, ty + 1, cz + half), OBSIDIAN);
+        world.set(tx, ty + 2, cz, EMERALD_BLOCK);
+    }
+
+    // Wings: angular membranes off the shoulders, rising as they reach out. Two
+    // courses thick at the root so they read as wings rather than as fins.
+    // Wings stay small and swept back, as in the reference: big spread wings
+    // covered the body from the default view and the animal disappeared behind
+    // its own membranes.
+    for side in [-1i32, 1] {
+        for step in 1..=3 {
+            let z = cz + side * (1 + step);
+            let lift = y + 4 + step;
+            let reach = 3 - step;
+            box_of(world, (cx - 1, lift, z), (cx - 1 + reach, lift, z), OBSIDIAN);
+            if step == 1 {
+                box_of(world, (cx - 1, lift - 1, z), (cx + 1, lift - 1, z), OBSIDIAN);
+            }
+            // Red tip at the leading edge, as in the reference build.
+            world.set(cx - 1, lift, z, REDSTONE_BLOCK);
+        }
     }
 }
 
@@ -643,8 +630,8 @@ mod tests {
             assert!(count(w, GLASS) >= 3, "seed {seed}: no lit threshold");
             assert!(count(w, STONE_BRICKS) > 20, "seed {seed}: no bridge or ruin");
             assert!(count(w, OAK_LOG) > 40, "seed {seed}: no great tree");
-            // The dragon is by far the biggest gold structure in the scene.
-            assert!(count(w, GOLD_BLOCK) > 40, "seed {seed}: no dragon");
+            // The dragon is the only obsidian in the scene, and it is big.
+            assert!(count(w, OBSIDIAN) > 60, "seed {seed}: no dragon");
         }
     }
 
@@ -731,7 +718,7 @@ mod tests {
             for z in TEMPLE.1..TEMPLE.1 + TEMPLE_D {
                 match island.world.get(cx, y, z) {
                     QUARTZ | QUARTZ_BRICKS => roof = roof.max(y),
-                    GOLD_BLOCK => dragon_top = dragon_top.max(y),
+                    OBSIDIAN | EMERALD_BLOCK => dragon_top = dragon_top.max(y),
                     _ => {}
                 }
             }

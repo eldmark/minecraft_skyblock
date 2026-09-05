@@ -41,6 +41,12 @@ const MIN_LIGHT_CONTRIBUTION: f32 = 0.012;
 /// the image keeps tracking the animated water and gate instead of freezing.
 pub const SAMPLE_WINDOW: usize = 16;
 
+/// While the camera moves, one pixel in this many is traced each frame and the
+/// rest keep the colour they had. Two is a checkerboard: half the rays per frame,
+/// and a pixel is never more than one frame stale, which is what keeps a fast drag
+/// from breaking up into speckle.
+const MOVING_INTERLEAVE: usize = 2;
+
 /// Once the running average has settled, a pixel that is not changing is only
 /// re-traced every this many frames. Water, the gate and their reflections keep
 /// changing, so they stay on every frame; the still two thirds of the image do not.
@@ -59,6 +65,9 @@ pub struct Renderer {
     pub samples: usize,
     /// Per pixel: does this pixel still change from frame to frame?
     active: Vec<bool>,
+    /// The last complete frame shown while moving, so interleaved frames can keep
+    /// the pixels they do not trace.
+    display: Vec<u32>,
     /// The previous frame's sample per pixel. Comparing sample against sample (not
     /// against the running average, which is still catching up) is what makes the
     /// activity test see the animation instead of the convergence.
@@ -68,6 +77,11 @@ pub struct Renderer {
     /// Skip re-tracing quiet pixels once the image has settled. On by default; the
     /// tests turn it off to compare against the full refinement.
     pub selective_refresh: bool,
+    /// Which interleave phase the next moving frame traces.
+    moving_phase: usize,
+    /// False until a full-resolution frame has filled the buffer, so the first
+    /// frame after a resize is not built on top of stale or blank pixels.
+    interleave_primed: bool,
 }
 
 impl Default for Renderer {
@@ -86,14 +100,22 @@ impl Renderer {
             samples: 0,
             active: Vec::new(),
             previous: Vec::new(),
+            display: Vec::new(),
             last_traced: 0,
             selective_refresh: true,
+            moving_phase: 0,
+            interleave_primed: false,
         }
     }
 
     /// Drop the accumulated samples: the image is about to change.
     pub fn reset_accumulation(&mut self) {
         self.samples = 0;
+    }
+
+    /// Forget the interleaved frame: the next moving frame will be a full one.
+    pub fn invalidate_moving(&mut self) {
+        self.interleave_primed = false;
     }
 
     /// Mark every pixel as changing again, without throwing the image away.
@@ -200,6 +222,54 @@ impl Renderer {
         );
         self.last_traced = traced.load(Ordering::Relaxed);
         self.samples = self.samples.saturating_add(1);
+    }
+
+    /// The frame to draw while the camera is moving.
+    ///
+    /// Instead of tracing a half-resolution image and stretching it — which turns
+    /// every edge into stair-steps for as long as the drag lasts — this traces one
+    /// pixel in four at full resolution and leaves the other three showing what
+    /// they showed last frame. Same number of rays, but the detail that is drawn
+    /// is real detail, and a pixel is at most three frames stale.
+    pub fn render_moving(&mut self, frame: &mut Framebuffer, scene: &Scene, camera: &Camera) {
+        let (w, h) = (frame.width, frame.height);
+        if !self.interleave_primed || self.display.len() != w * h {
+            // Nothing trustworthy on screen yet: pay for one full frame.
+            self.display.clear();
+            self.display.resize(w * h, 0);
+            self.render(frame, scene, camera);
+            self.display.copy_from_slice(&frame.pixels);
+            self.interleave_primed = true;
+            self.moving_phase = 0;
+            return;
+        }
+
+        let phase = self.moving_phase;
+        self.moving_phase = (self.moving_phase + 1) % MOVING_INTERLEAVE;
+        let threads = self.threads;
+        let traced = AtomicUsize::new(0);
+
+        // Copy forward what was on screen, then overwrite this phase's pixels.
+        frame.pixels.copy_from_slice(&self.display);
+        render_strips(&mut frame.pixels, w, ROWS_PER_STRIP, threads, |strip, first_row| {
+            let mut count = 0usize;
+            for (i, px) in strip.iter_mut().enumerate() {
+                let y = first_row + i / w;
+                let x = i % w;
+                // Checkerboard: the two phases tile the plane, so every pixel is
+                // refreshed on alternate frames wherever the camera points.
+                if (x + y) % MOVING_INTERLEAVE != phase {
+                    continue;
+                }
+                let ray = camera.ray(x, y, w, h, (0.5, 0.5));
+                *px = to_srgb_u32(trace_color(scene, &ray));
+                count += 1;
+            }
+            traced.fetch_add(count, Ordering::Relaxed);
+        });
+        self.display.copy_from_slice(&frame.pixels);
+        self.last_traced = traced.load(Ordering::Relaxed);
+        self.samples = 0;
     }
 
     pub fn render(&mut self, frame: &mut Framebuffer, scene: &Scene, camera: &Camera) {
@@ -802,6 +872,51 @@ mod tests {
             "{far} of {} pixels drifted from the fully refreshed image",
             refined.pixels.len()
         );
+    }
+
+    #[test]
+    fn two_moving_frames_cover_every_pixel() {
+        let Some(scene) = scene() else { return };
+        let camera = Camera::new(vec3(24.0, 34.0, 24.0), 90.0);
+        let mut moving = Framebuffer::new(96, 72);
+        let mut renderer = Renderer::new();
+
+        // Prime, then two interleaved frames with the camera held still: between
+        // them the two checkerboard phases touch every pixel, so the result must
+        // match a full-resolution render exactly.
+        renderer.render_moving(&mut moving, &scene, &camera);
+        renderer.render_moving(&mut moving, &scene, &camera);
+        assert!(
+            renderer.last_traced * 2 <= 96 * 72 + 96,
+            "an interleaved frame traced {} of {} pixels",
+            renderer.last_traced,
+            96 * 72
+        );
+        renderer.render_moving(&mut moving, &scene, &camera);
+
+        let mut full = Framebuffer::new(96, 72);
+        Renderer::new().render(&mut full, &scene, &camera);
+        assert_eq!(
+            moving.pixels, full.pixels,
+            "interleaved frames should rebuild the exact image when nothing moves"
+        );
+    }
+
+    #[test]
+    fn a_resize_forces_a_full_moving_frame() {
+        let Some(scene) = scene() else { return };
+        let camera = Camera::new(vec3(24.0, 34.0, 24.0), 90.0);
+        let mut frame = Framebuffer::new(64, 48);
+        let mut renderer = Renderer::new();
+        renderer.render_moving(&mut frame, &scene, &camera);
+        renderer.render_moving(&mut frame, &scene, &camera);
+
+        // After a resize the old contents mean nothing, so the next frame has to
+        // be a complete one or the window would show garbage.
+        frame.resize(80, 60);
+        renderer.invalidate_moving();
+        renderer.render_moving(&mut frame, &scene, &camera);
+        assert_eq!(frame.pixels.iter().filter(|&&p| p == 0).count(), 0);
     }
 
     #[test]

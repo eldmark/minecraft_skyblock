@@ -45,6 +45,8 @@ enum Mode {
     Bench,
     /// Time the idle path: accumulate frames with a still camera.
     BenchIdle,
+    /// Time the path taken while the camera is being dragged.
+    BenchMove,
     /// Decode textures straight from the pack and report what was found.
     CheckPack { dump: Option<(String, PathBuf)> },
 }
@@ -97,6 +99,12 @@ impl Args {
                     args.mode = Mode::CheckPack {
                         dump: Some((name, out.into())),
                     };
+                }
+                "--bench-move" => {
+                    args.mode = Mode::BenchMove;
+                    if let Some(n) = argv.next().and_then(|v| v.parse().ok()) {
+                        args.frames = n;
+                    }
                 }
                 "--bench-idle" => {
                     args.mode = Mode::BenchIdle;
@@ -165,6 +173,7 @@ usage: skyblock [--window | --render DIR | --bench N] [--frames N] [--width W] [
   --render DIR     write an orbit as PNG frames, no window
   --bench N        render N frames and report ms/frame
   --bench-idle N   time N refinement frames with a still camera
+  --bench-move N   time N frames of a camera being dragged (writes bench_move.png)
   --threads N      force the worker count (default: all cores)
   --seed N         terrain seed (R reseeds in the window)
   --sky-panorama   use the pack's panorama cubemap instead of the dusk sky
@@ -186,10 +195,10 @@ fn scene_camera(world: &World) -> Camera {
     // structure near the upper third, the way the reference diorama is framed.
     let center = vec3(
         world.size[0] as f32 * 0.5,
-        terrain::SURFACE_LEVEL + 2.0,
+        terrain::SURFACE_LEVEL + 4.0,
         world.size[2] as f32 * 0.5,
     );
-    Camera::new(center, world.size[0] as f32 * 1.75)
+    Camera::new(center, world.size[0] as f32 * 1.9)
 }
 
 fn run_headless(mut out: Box<dyn Output>, args: &Args, report: bool) -> io::Result<()> {
@@ -271,6 +280,44 @@ tracing {:.0}% of the pixels",
     Ok(())
 }
 
+/// Time the path the window takes while the camera is being dragged, and leave the
+/// last frame on disk so the result can be looked at, not just measured.
+fn bench_move(args: &Args) -> io::Result<()> {
+    let mut scene = load_scene(args.seed, args.panorama_sky, args.time)?;
+    let mut camera = scene_camera(scene.world());
+    let mut frame = Framebuffer::new(args.width, args.height);
+    let mut renderer = Renderer::new();
+    if let Some(threads) = args.threads {
+        renderer.threads = threads;
+    }
+
+    let frames = args.frames.max(1);
+    let pixels = args.width * args.height;
+    // Prime the buffer, as a real drag does, then time the frames after it.
+    renderer.render_moving(&mut frame, &scene, &camera);
+    let start = Instant::now();
+    let mut traced_total = 0usize;
+    for i in 0..frames {
+        camera.apply((6.0, 0.0), 0.0);
+        renderer.render_moving(&mut frame, &scene, &camera);
+        scene.tick += 1;
+        traced_total += renderer.last_traced;
+        let _ = i;
+    }
+    let ms = start.elapsed().as_secs_f64() * 1000.0 / frames as f64;
+    println!(
+        "{frames} moving frames at {}x{}, {} threads: {ms:.2} ms/frame ({:.1} fps), \
+tracing {:.0}% of the pixels",
+        args.width,
+        args.height,
+        renderer.threads,
+        1000.0 / ms,
+        100.0 * traced_total as f64 / (frames * pixels) as f64
+    );
+    frame.save_png(std::path::Path::new("bench_move.png"))?;
+    Ok(())
+}
+
 fn run_window(args: &Args) -> io::Result<()> {
     let mut scene = load_scene(args.seed, args.panorama_sky, args.time)?;
     let mut camera = scene_camera(scene.world());
@@ -328,8 +375,13 @@ fn run_window(args: &Args) -> io::Result<()> {
         }
         let moving = !input.is_idle() || resized || input.reseed;
         if moving {
-            renderer.scale = quality.max(2);
-            renderer.render(&mut frame, &scene, &camera);
+            // Full resolution, a quarter of the pixels per frame, the rest kept
+            // from the frame before. Sharper than stretching a half-size image.
+            if resized || input.reseed {
+                renderer.invalidate_moving();
+            }
+            renderer.scale = quality;
+            renderer.render_moving(&mut frame, &scene, &camera);
             renderer.reset_accumulation();
             scene.tick += 1;
         } else {
@@ -421,6 +473,7 @@ fn main() -> io::Result<()> {
         }
         Mode::Bench => run_headless(Box::new(NullOutput::new(args.frames)), &args, true),
         Mode::BenchIdle => bench_idle(&args),
+        Mode::BenchMove => bench_move(&args),
         Mode::CheckPack { dump } => check_pack(dump.as_ref()),
     }
 }

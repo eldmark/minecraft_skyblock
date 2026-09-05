@@ -26,8 +26,9 @@ cargo run --release                              # ventana interactiva
 cargo run --release -- --render out/ -n 240 --samples 8   # órbita a PNGs, sin ventana
 cargo run --release -- --bench 30                # medición de ms/frame
 cargo run --release -- --bench-idle 60           # medición del frame en reposo
+cargo run --release -- --bench-move 60           # medición del frame mientras se arrastra
 cargo run --release -- --check-pack              # verifica la carga del texture pack
-cargo test --release                             # 101 pruebas
+cargo test --release                             # 103 pruebas
 ```
 
 Opciones: `--width W --height H --seed N --threads N --samples N --sky-panorama
@@ -50,11 +51,11 @@ que es como se arma el video del ciclo.
 | `P` | Captura de pantalla a PNG |
 | `Esc` | Salir |
 
-Mientras la cámara se mueve, el render baja de resolución para mantener la
-interacción fluida; al soltarla vuelve a resolución completa y **acumula muestras
-jittereadas** hasta converger, que es de donde sale el antialiasing. Ya convergida,
-solo se re-trazan los píxeles que siguen cambiando —el agua, el portal y sus
-reflejos—: el frame en reposo cuesta la mitad y la imagen no cambia.
+Mientras la cámara se mueve se traza **medio frame en tablero de ajedrez a resolución
+completa** y el resto conserva el color anterior: mismo costo que media resolución, sin
+los bordes escalonados. Al soltarla se **acumulan muestras jittereadas** hasta
+converger, que es de donde sale el antialiasing; ya convergida solo se re-trazan los
+píxeles que siguen cambiando —el agua, el portal y sus reflejos—.
 
 ## Texture pack
 
@@ -86,7 +87,7 @@ El programa lee las texturas directamente del ZIP con su propio DEFLATE.
 ## La escena
 
 Siguiendo el diorama de referencia: isla flotante con un **templo de columnas** y su
-puerta de cristal iluminada, un **dragón de bloques de oro** posado en la cumbrera con
+puerta de cristal iluminada, un **dragón de obsidiana** encabritado sobre la cumbrera, con lomo de esmeralda y
 ojos de glowstone, un **gran árbol** sobre un afloramiento rocoso, un **río**
 que cruza la isla y cae por los dos bordes, un **puente de piedra** con linternas, y
 una **ruina** de columnas rotas en primer plano. Debajo, vetas de oro, hierro y
@@ -119,12 +120,13 @@ El ciclo de día y noche cuesta **~4.5 ms cada vez que rehornea el cielo** (medi
 ventana el cielo solo se rehornea al cruzar uno de los 96 pasos del día, así que con
 un día de 30 s son ~3 rehorneados por segundo: cerca del 1.5% del tiempo de frame.
 
-Frames en reposo (cámara quieta, refinando), 640×520 con 16 hilos:
+Los dos caminos interactivos cuestan bastante menos que un frame completo:
 
-| | ms/frame | píxeles trazados |
+| Camino (900×600, 16 hilos) | ms/frame | píxeles trazados |
 |---|---|---|
-| Antes | 18.5 | 100% |
-| Con refresco selectivo | **10.0** | 37% |
+| Frame completo | 24.1 | 100% |
+| Arrastrando (tablero) | **14.6** (69 fps) | 50% |
+| En reposo (refresco selectivo) | **16.0** | 49% |
 
 Un cambio de hora no reinicia nada: marca todos los píxeles como activos y re-sombrea
 a resolución plena sobre la imagen que ya había, así el ciclo se ve como un fundido.

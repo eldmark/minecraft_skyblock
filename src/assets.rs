@@ -279,6 +279,49 @@ impl Assets {
                 Material::diffuse(2.0).with_tint(vec3(0.62, 0.85, 0.55)),
             ),
             (
+                // Obsidian is glassy volcanic rock: dark, and shiny enough that a
+                // dragon built from it catches every lantern around the temple.
+                blocks::OBSIDIAN,
+                "obsidian",
+                "obsidian",
+                "obsidian",
+                Material {
+                    specular: 0.55,
+                    shininess: 72.0,
+                    reflectivity: 0.22,
+                    normal_strength: 3.5,
+                    ..Material::default()
+                },
+            ),
+            (
+                blocks::CRYING_OBSIDIAN,
+                "crying_obsidian",
+                "crying_obsidian",
+                "crying_obsidian",
+                Material {
+                    specular: 0.55,
+                    shininess: 72.0,
+                    reflectivity: 0.22,
+                    normal_strength: 3.5,
+                    ..Material::default()
+                }
+                .with_emission(0.5),
+            ),
+            (
+                blocks::EMERALD_BLOCK,
+                "emerald_block",
+                "emerald_block",
+                "emerald_block",
+                Material::metal(vec3(0.55, 1.0, 0.68), 0.30),
+            ),
+            (
+                blocks::REDSTONE_BLOCK,
+                "redstone_block",
+                "redstone_block",
+                "redstone_block",
+                Material::diffuse(3.0).with_emission(0.25),
+            ),
+            (
                 blocks::FLOWERING_LEAVES,
                 "flowering_azalea_leaves",
                 "flowering_azalea_leaves",
