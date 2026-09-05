@@ -45,9 +45,9 @@ impl Scene {
             },
             // Low sun, matching the reference diorama's warm rim light.
             sun_dir,
-            sun_color: vec3(1.35, 1.12, 0.86),
-            sky_color: vec3(0.30, 0.40, 0.62),
-            ground_color: vec3(0.16, 0.13, 0.11),
+            sun_color: vec3(1.75, 1.42, 1.02),
+            sky_color: vec3(0.34, 0.44, 0.68),
+            ground_color: vec3(0.17, 0.15, 0.16),
             lights,
             effect_noise: Noise::new(0xC0FFEE),
             tick: 0,

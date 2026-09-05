@@ -157,13 +157,14 @@ fn load_scene(seed: u32, panorama_sky: bool) -> io::Result<Scene> {
 }
 
 fn scene_camera(world: &World) -> Camera {
-    // Aim a little above the middle of the terrain, where the island sits.
+    // Aim just below the shrine's floor so the island fills the frame with the
+    // structure near the upper third, the way the reference diorama is framed.
     let center = vec3(
         world.size[0] as f32 * 0.5,
-        terrain::SURFACE_LEVEL - 4.0,
+        terrain::SURFACE_LEVEL - 3.0,
         world.size[2] as f32 * 0.5,
     );
-    Camera::new(center, world.size[0] as f32 * 1.9)
+    Camera::new(center, world.size[0] as f32 * 1.55)
 }
 
 fn run_headless(mut out: Box<dyn Output>, args: &Args, report: bool) -> io::Result<()> {

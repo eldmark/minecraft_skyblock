@@ -83,7 +83,9 @@ impl Assets {
                 "water_still",
                 "water_still",
                 "water_still",
-                Material::refractive(0.78, 1.33, 0.28).with_tint(vec3(0.55, 0.78, 0.95)),
+                // Clear enough that the sandy pond floor shows through: the point
+                // of refraction is seeing what is behind the surface.
+                Material::refractive(0.88, 1.33, 0.30).with_tint(vec3(0.72, 0.88, 1.0)),
             ),
             (
                 blocks::OAK_LOG,

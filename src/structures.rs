@@ -103,6 +103,16 @@ pub fn place_shrine(island: &mut Island) {
         world.set(x, base + 2, z, GLOWSTONE);
     }
 
+    // A lit glass panel in the floor in front of the gate: glowstone buried under
+    // transparent blocks, so the refraction has something bright directly behind
+    // it and the approach to the gate glows from below.
+    for x in px + 1..=px + 3 {
+        for z in pz - 2..=pz - 1 {
+            world.set(x, base - 1, z, GLOWSTONE);
+            world.set(x, base, z, GLASS);
+        }
+    }
+
     // A plank path running off the platform towards the pond.
     let mut x = x0 - 1;
     let mut z = z0 + d / 2;
@@ -191,6 +201,10 @@ mod tests {
             assert!(
                 count(&island.world, GLOWSTONE) >= 7,
                 "seed {seed}: not enough lanterns"
+            );
+            assert!(
+                count(&island.world, GLASS) >= 6,
+                "seed {seed}: the lit glass floor panel is missing"
             );
         }
     }
