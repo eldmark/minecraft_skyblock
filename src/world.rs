@@ -65,6 +65,7 @@ impl Ray {
 }
 
 #[derive(Clone, Copy, Debug)]
+#[allow(dead_code)] // `t` and `voxel` are part of the hit record the tests assert on.
 pub struct Hit {
     pub t: f32,
     pub block: BlockId,
@@ -152,6 +153,7 @@ impl World {
         !self.macro_occupied[self.macro_index(x as usize, y as usize, z as usize)]
     }
 
+    #[cfg(test)]
     pub fn solid_count(&self) -> usize {
         self.blocks.iter().filter(|&&b| b != AIR).count()
     }
@@ -289,10 +291,6 @@ impl World {
         None
     }
 
-    /// Any-hit query for shadow rays: stops at the first blocker, no hit record.
-    pub fn occluded<F: Fn(BlockId) -> bool>(&self, ray: &Ray, max_t: f32, blocks: F) -> bool {
-        self.trace(ray, max_t, blocks).is_some()
-    }
 }
 
 /// Texture coordinates for a point on a given face of a unit cube.

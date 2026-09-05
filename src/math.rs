@@ -17,10 +17,6 @@ impl Vec3 {
     pub const ZERO: Vec3 = vec3(0.0, 0.0, 0.0);
     pub const ONE: Vec3 = vec3(1.0, 1.0, 1.0);
 
-    pub const fn splat(v: f32) -> Vec3 {
-        vec3(v, v, v)
-    }
-
     pub fn dot(self, o: Vec3) -> f32 {
         self.x * o.x + self.y * o.y + self.z * o.z
     }
@@ -55,14 +51,8 @@ impl Vec3 {
         vec3(self.x * o.x, self.y * o.y, self.z * o.z)
     }
 
-    pub fn min_elem(self, o: Vec3) -> Vec3 {
-        vec3(self.x.min(o.x), self.y.min(o.y), self.z.min(o.z))
-    }
-
-    pub fn max_elem(self, o: Vec3) -> Vec3 {
-        vec3(self.x.max(o.x), self.y.max(o.y), self.z.max(o.z))
-    }
-
+    /// Used by tests to compare brightness between shaded points.
+    #[cfg(test)]
     pub fn max_component(self) -> f32 {
         self.x.max(self.y).max(self.z)
     }
@@ -77,14 +67,6 @@ impl Vec3 {
 
     pub fn lerp(self, o: Vec3, t: f32) -> Vec3 {
         self * (1.0 - t) + o * t
-    }
-
-    pub fn clamp01(self) -> Vec3 {
-        vec3(
-            self.x.clamp(0.0, 1.0),
-            self.y.clamp(0.0, 1.0),
-            self.z.clamp(0.0, 1.0),
-        )
     }
 
     /// Mirror direction around a normal. `self` points at the surface.

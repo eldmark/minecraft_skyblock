@@ -28,10 +28,6 @@ impl Pack {
         self.archive.read(name)
     }
 
-    pub fn has(&self, name: &str) -> bool {
-        self.archive.contains(name)
-    }
-
     pub fn entry_count(&self) -> usize {
         self.archive.names().count()
     }

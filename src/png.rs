@@ -156,18 +156,6 @@ pub struct Image {
     pub rgba: Vec<u8>,
 }
 
-impl Image {
-    pub fn pixel(&self, x: usize, y: usize) -> [u8; 4] {
-        let i = (y * self.width + x) * 4;
-        [
-            self.rgba[i],
-            self.rgba[i + 1],
-            self.rgba[i + 2],
-            self.rgba[i + 3],
-        ]
-    }
-}
-
 /// Undo PNG's per-scanline filters. `bpp` is bytes per pixel, rounded up.
 fn unfilter(raw: &[u8], width: usize, height: usize, bpp: usize) -> Result<Vec<u8>, String> {
     let stride = width * bpp;

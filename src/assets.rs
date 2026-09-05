@@ -45,7 +45,7 @@ impl Assets {
         ];
         let mut materials = vec![Material::default(); COUNT];
 
-        let mut load = |name: &str,
+        let load = |name: &str,
                         strength: f32,
                         textures: &mut Vec<Texture>,
                         by_name: &mut HashMap<String, usize>|
@@ -241,6 +241,7 @@ impl Assets {
         &self.materials[block as usize]
     }
 
+    #[cfg(test)]
     pub fn texture_count(&self) -> usize {
         self.textures.len()
     }

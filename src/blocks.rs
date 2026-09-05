@@ -27,22 +27,13 @@ pub const PORTAL: Block = 20;
 
 pub const COUNT: usize = 21;
 
-/// Light passes through these, so they need special handling in shadow rays and
-/// in refraction. Kept here because both the renderer and the generator ask.
-pub fn is_transparent(block: Block) -> bool {
-    matches!(block, AIR | WATER | GLASS | PORTAL)
-}
-
 /// Blocks that emit light of their own.
 pub fn is_emissive(block: Block) -> bool {
     matches!(block, GLOWSTONE | PORTAL)
 }
 
-/// Blocks a generator may replace when carving or planting.
-pub fn is_replaceable(block: Block) -> bool {
-    matches!(block, AIR | WATER | OAK_LEAVES)
-}
-
+/// Used in test failures and error messages.
+#[allow(dead_code)]
 pub fn name(block: Block) -> &'static str {
     match block {
         AIR => "air",
@@ -82,10 +73,8 @@ mod tests {
     }
 
     #[test]
-    fn transparency_and_emission_agree_with_intent() {
-        assert!(is_transparent(WATER) && is_transparent(GLASS) && is_transparent(PORTAL));
-        assert!(!is_transparent(STONE) && !is_transparent(GRASS));
+    fn emission_agrees_with_intent() {
         assert!(is_emissive(GLOWSTONE) && is_emissive(PORTAL));
-        assert!(!is_emissive(GOLD_BLOCK));
+        assert!(!is_emissive(GOLD_BLOCK) && !is_emissive(STONE));
     }
 }

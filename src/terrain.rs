@@ -116,7 +116,7 @@ fn carve_basin(world: &mut World, noise: &Noise, surface: &mut [Option<i32>]) {
     let pond = (11.0f32, 19.0f32);
     let pond_radius = 4.2f32;
 
-    let mut carve = |world: &mut World, surface: &mut [Option<i32>], x: i32, z: i32, floor: i32, bed: Block| {
+    let carve = |world: &mut World, surface: &mut [Option<i32>], x: i32, z: i32, floor: i32, bed: Block| {
         let Some(top) = surface[z as usize * SIZE + x as usize] else {
             return;
         };
