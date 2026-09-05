@@ -5,10 +5,14 @@
 //!   skyblock --render out/ -n 240  write an orbit as PNGs, no window
 //!   skyblock --bench 60            time N frames, no window, no I/O
 
+mod inflate;
 mod math;
+mod pack;
 mod output;
 mod png;
+mod texture;
 mod window;
+mod zip;
 
 use std::io;
 use std::path::PathBuf;
@@ -22,6 +26,8 @@ enum Mode {
     Window,
     Render { dir: PathBuf },
     Bench,
+    /// Decode textures straight from the pack and report what was found.
+    CheckPack { dump: Option<(String, PathBuf)> },
 }
 
 struct Args {
@@ -46,6 +52,14 @@ impl Args {
                 "--render" => {
                     let dir = argv.next().unwrap_or_else(|| "out".into());
                     args.mode = Mode::Render { dir: dir.into() };
+                }
+                "--check-pack" => args.mode = Mode::CheckPack { dump: None },
+                "--dump" => {
+                    let name = argv.next().unwrap_or_default();
+                    let out = argv.next().unwrap_or_else(|| "dump.rgba".into());
+                    args.mode = Mode::CheckPack {
+                        dump: Some((name, out.into())),
+                    };
                 }
                 "--bench" => {
                     args.mode = Mode::Bench;
@@ -88,7 +102,9 @@ usage: skyblock [--window | --render DIR | --bench N] [--frames N] [--width W] [
   --window         live window (default): drag to orbit, scroll or W/S to zoom,
                    R reseeds, P screenshots, 1-4 set resolution scale, Esc quits
   --render DIR     write an orbit as PNG frames, no window
-  --bench N        render N frames and report ms/frame";
+  --bench N        render N frames and report ms/frame
+  --check-pack     decode textures from the resource pack and report findings
+  --dump NAME OUT  decode one pack entry and write its raw RGBA bytes";
 
 /// Placeholder scene for phase 0: a sky gradient, so the whole pipeline
 /// (render -> framebuffer -> window/PNG) can be verified before any tracing exists.
@@ -159,6 +175,51 @@ fn run_window(args: &Args) -> io::Result<()> {
     Ok(())
 }
 
+/// Exercises the hand-written ZIP reader, inflate and PNG decoder against the
+/// real pack, and can dump raw pixels so they can be diffed against a reference.
+fn check_pack(dump: Option<&(String, PathBuf)>) -> io::Result<()> {
+    let pack = pack::Pack::open(None).map_err(io::Error::other)?;
+    println!("pack: {} ({} entries)", pack.path.display(), pack.entry_count());
+
+    if let Some((name, out_path)) = dump {
+        let image = pack.decode_png(name).map_err(io::Error::other)?;
+        std::fs::write(out_path, &image.rgba)?;
+        println!(
+            "{name}: {}x{} -> {} ({} bytes RGBA)",
+            image.width,
+            image.height,
+            out_path.display(),
+            image.rgba.len()
+        );
+        return Ok(());
+    }
+
+    for name in [
+        "stone",
+        "grass_block_top",
+        "dirt",
+        "water_still",
+        "glass",
+        "gold_block",
+        "glowstone",
+        "quartz_block_side",
+        "oak_leaves",
+        "diamond_ore",
+    ] {
+        match pack.block_texture(name, 3.0) {
+            Ok(tex) => println!(
+                "  {name:<18} {}x{} x{} frames  avg {:?}",
+                tex.width,
+                tex.height,
+                tex.frames,
+                tex.average()
+            ),
+            Err(e) => println!("  {name:<18} FAILED: {e}"),
+        }
+    }
+    Ok(())
+}
+
 fn main() -> io::Result<()> {
     let args = Args::parse();
     match &args.mode {
@@ -167,6 +228,7 @@ fn main() -> io::Result<()> {
             println!("rendering {} frames to {}", args.frames, dir.display());
             run_headless(Box::new(FileOutput::new(dir.clone(), args.frames)), &args, true)
         }
+        Mode::CheckPack { dump } => check_pack(dump.as_ref()),
         Mode::Bench => run_headless(Box::new(NullOutput::new(args.frames)), &args, true),
     }
 }
