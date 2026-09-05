@@ -19,6 +19,7 @@ mod png;
 mod render;
 mod scene;
 mod skybox;
+mod structures;
 mod terrain;
 mod texture;
 mod window;

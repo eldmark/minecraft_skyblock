@@ -24,6 +24,12 @@ pub struct Island {
 }
 
 impl Island {
+    pub fn set_surface(&mut self, x: i32, z: i32, top: i32) {
+        if x >= 0 && z >= 0 && x < SIZE as i32 && z < SIZE as i32 {
+            self.surface[z as usize * SIZE + x as usize] = Some(top);
+        }
+    }
+
     pub fn surface_at(&self, x: i32, z: i32) -> Option<i32> {
         if x < 0 || z < 0 || x >= SIZE as i32 || z >= SIZE as i32 {
             return None;

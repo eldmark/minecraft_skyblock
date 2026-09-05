@@ -4,7 +4,9 @@
 use crate::assets::Assets;
 use crate::math::{vec3, Vec3};
 use crate::pack::Pack;
+use crate::blocks::Block;
 use crate::skybox::Skybox;
+use crate::structures;
 use crate::terrain::{self, Island};
 use crate::world::World;
 
@@ -18,6 +20,8 @@ pub struct Scene {
     /// Sky light that reaches surfaces facing up, and its ground counterpart.
     pub sky_color: Vec3,
     pub ground_color: Vec3,
+    /// Emissive blocks, as light positions at block centers.
+    pub lights: Vec<(Vec3, Block)>,
     /// Animation frame counter, advanced once per rendered frame.
     pub tick: usize,
 }
@@ -25,8 +29,11 @@ pub struct Scene {
 impl Scene {
     pub fn load(seed: u32, pack: &Pack, panorama_sky: bool) -> Result<Scene, String> {
         let sun_dir = vec3(0.55, 0.62, 0.36).normalized();
+        let mut island = terrain::generate(seed);
+        structures::place_shrine(&mut island);
+        let lights = structures::collect_lights(&island.world);
         Ok(Scene {
-            island: terrain::generate(seed),
+            island,
             assets: Assets::load(pack)?,
             skybox: if panorama_sky {
                 Skybox::panorama(pack, sun_dir)
@@ -38,6 +45,7 @@ impl Scene {
             sun_color: vec3(1.35, 1.12, 0.86),
             sky_color: vec3(0.30, 0.40, 0.62),
             ground_color: vec3(0.16, 0.13, 0.11),
+            lights,
             tick: 0,
         })
     }
@@ -47,7 +55,10 @@ impl Scene {
     }
 
     pub fn reseed(&mut self, seed: u32) {
-        self.island = terrain::generate(seed);
+        let mut island = terrain::generate(seed);
+        structures::place_shrine(&mut island);
+        self.lights = structures::collect_lights(&island.world);
+        self.island = island;
     }
 
     /// Frame index for an animated texture with `frames` frames. Minecraft's water
