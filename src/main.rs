@@ -5,14 +5,17 @@
 //!   skyblock --render out/ -n 240  write an orbit as PNGs, no window
 //!   skyblock --bench 60            time N frames, no window, no I/O
 
+mod blocks;
 mod camera;
 mod inflate;
+mod noise;
 mod math;
 mod output;
 mod pack;
 mod parallel;
 mod png;
 mod render;
+mod terrain;
 mod texture;
 mod window;
 mod world;
@@ -44,6 +47,7 @@ struct Args {
     frames: usize,
     /// Override the worker count; used to measure scaling.
     threads: Option<usize>,
+    seed: u32,
 }
 
 impl Args {
@@ -54,6 +58,7 @@ impl Args {
             height: 600,
             frames: 240,
             threads: None,
+            seed: 2024,
         };
         let mut argv = std::env::args().skip(1);
         while let Some(arg) = argv.next() {
@@ -80,6 +85,11 @@ impl Args {
                 "--frames" | "-n" => {
                     if let Some(n) = argv.next().and_then(|v| v.parse().ok()) {
                         args.frames = n;
+                    }
+                }
+                "--seed" => {
+                    if let Some(n) = argv.next().and_then(|v| v.parse().ok()) {
+                        args.seed = n;
                     }
                 }
                 "--threads" => args.threads = argv.next().and_then(|v| v.parse().ok()),
@@ -115,49 +125,23 @@ usage: skyblock [--window | --render DIR | --bench N] [--frames N] [--width W] [
   --render DIR     write an orbit as PNG frames, no window
   --bench N        render N frames and report ms/frame
   --threads N      force the worker count (default: all cores)
+  --seed N         terrain seed (R reseeds in the window)
   --check-pack     decode textures from the resource pack and report findings
   --dump NAME OUT  decode one pack entry and write its raw RGBA bytes";
 
-/// Placeholder scene until procedural terrain lands: a plateau with a few pillars,
-/// enough to exercise traversal, faces and the camera.
-fn placeholder_world() -> World {
-    let size = 32usize;
-    let mut world = World::new([size, 24, size]);
-    for x in 0..size as i32 {
-        for z in 0..size as i32 {
-            let dx = x as f32 - 15.5;
-            let dz = z as f32 - 15.5;
-            let radius = (dx * dx + dz * dz).sqrt();
-            if radius > 15.0 {
-                continue;
-            }
-            let height = 6 - (radius * 0.25) as i32;
-            for y in 0..=height {
-                let block = if y == height { 1 } else { 2 };
-                world.set(x, y, z, block);
-            }
-        }
-    }
-    for (x, z) in [(10, 10), (21, 12), (14, 20)] {
-        for y in 7..11 {
-            world.set(x, y, z, 3);
-        }
-    }
-    world
-}
-
 fn scene_camera(world: &World) -> Camera {
+    // Aim a little above the middle of the terrain, where the island sits.
     let center = vec3(
         world.size[0] as f32 * 0.5,
-        world.size[1] as f32 * 0.28,
+        terrain::SURFACE_LEVEL - 4.0,
         world.size[2] as f32 * 0.5,
     );
-    Camera::new(center, world.size[0] as f32 * 1.7)
+    Camera::new(center, world.size[0] as f32 * 1.9)
 }
 
 fn run_headless(mut out: Box<dyn Output>, args: &Args, report: bool) -> io::Result<()> {
-    let world = placeholder_world();
-    let mut camera = scene_camera(&world);
+    let mut island = terrain::generate(args.seed);
+    let mut camera = scene_camera(&island.world);
     let mut frame = Framebuffer::new(args.width, args.height);
     let mut renderer = Renderer::new();
     if let Some(threads) = args.threads {
@@ -169,7 +153,7 @@ fn run_headless(mut out: Box<dyn Output>, args: &Args, report: bool) -> io::Resu
     loop {
         // A full turn over the requested frame count, so --render yields a loop.
         camera.yaw = std::f32::consts::TAU * rendered as f32 / args.frames.max(1) as f32;
-        renderer.render(&mut frame, &world, &camera);
+        renderer.render(&mut frame, &island.world, &camera);
         rendered += 1;
         if !out.present(&frame)? {
             break;
@@ -189,8 +173,8 @@ fn run_headless(mut out: Box<dyn Output>, args: &Args, report: bool) -> io::Resu
 }
 
 fn run_window(args: &Args) -> io::Result<()> {
-    let world = placeholder_world();
-    let mut camera = scene_camera(&world);
+    let mut island = terrain::generate(args.seed);
+    let mut camera = scene_camera(&island.world);
     let mut win = WindowOutput::new("Skyblock Diorama", args.width, args.height)?;
     let mut frame = Framebuffer::new(args.width, args.height);
     let mut renderer = Renderer::new();
@@ -205,6 +189,11 @@ fn run_window(args: &Args) -> io::Result<()> {
         let input = win.poll_input();
         camera.apply(input.orbit, input.zoom);
 
+        if input.reseed {
+            let seed = island.seed.wrapping_mul(1664525).wrapping_add(1013904223);
+            island = terrain::generate(seed);
+            println!("regenerated terrain with seed {seed}");
+        }
         if let Some(q) = input.quality {
             quality = q;
         }
@@ -213,7 +202,7 @@ fn run_window(args: &Args) -> io::Result<()> {
 
         let (w, h) = win.size();
         frame.resize(w, h);
-        renderer.render(&mut frame, &world, &camera);
+        renderer.render(&mut frame, &island.world, &camera);
 
         if input.screenshot {
             let path = PathBuf::from(format!("screenshot_{shots:03}.png"));
@@ -301,7 +290,7 @@ mod scene_tests {
 
     #[test]
     fn the_placeholder_island_is_visible_from_the_default_camera() {
-        let world = placeholder_world();
+        let world = terrain::generate(2024).world;
         let camera = scene_camera(&world);
         let (w, h) = (64usize, 48usize);
         let mut hits = 0;
@@ -318,7 +307,7 @@ mod scene_tests {
 
     #[test]
     fn the_island_stays_in_frame_through_a_full_orbit() {
-        let world = placeholder_world();
+        let world = terrain::generate(2024).world;
         let mut camera = scene_camera(&world);
         let (w, h) = (64usize, 48usize);
         for step in 0..8 {

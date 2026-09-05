@@ -73,12 +73,29 @@ fn render_into(
     });
 }
 
-/// Temporary flat colors, one per placeholder block id. Real materials arrive
-/// with the texture mapping phase.
+/// Stand-in colors until textures are wired to blocks in the next phase.
 fn debug_color(block: BlockId) -> Vec3 {
+    use crate::blocks::*;
     match block {
-        1 => vec3(0.28, 0.52, 0.18),
-        2 => vec3(0.36, 0.26, 0.18),
+        GRASS => vec3(0.28, 0.52, 0.18),
+        DIRT => vec3(0.36, 0.26, 0.18),
+        STONE => vec3(0.42, 0.42, 0.44),
+        COBBLESTONE => vec3(0.36, 0.36, 0.38),
+        SAND => vec3(0.76, 0.70, 0.50),
+        WATER => vec3(0.15, 0.35, 0.75),
+        OAK_LOG => vec3(0.35, 0.26, 0.14),
+        OAK_LEAVES => vec3(0.16, 0.38, 0.12),
+        OAK_PLANKS => vec3(0.55, 0.42, 0.24),
+        GOLD_ORE => vec3(0.55, 0.45, 0.20),
+        IRON_ORE => vec3(0.52, 0.44, 0.38),
+        DIAMOND_ORE => vec3(0.35, 0.60, 0.62),
+        GOLD_BLOCK => vec3(0.90, 0.72, 0.22),
+        IRON_BLOCK => vec3(0.78, 0.78, 0.80),
+        DIAMOND_BLOCK => vec3(0.40, 0.85, 0.85),
+        QUARTZ | QUARTZ_PILLAR => vec3(0.90, 0.88, 0.84),
+        GLOWSTONE => vec3(1.00, 0.85, 0.45),
+        GLASS => vec3(0.80, 0.86, 0.88),
+        PORTAL => vec3(0.55, 0.70, 1.00),
         _ => vec3(0.62, 0.62, 0.66),
     }
 }
