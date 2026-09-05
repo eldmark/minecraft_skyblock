@@ -5,22 +5,29 @@
 //!   skyblock --render out/ -n 240  write an orbit as PNGs, no window
 //!   skyblock --bench 60            time N frames, no window, no I/O
 
+mod camera;
 mod inflate;
 mod math;
-mod pack;
 mod output;
+mod pack;
+mod parallel;
 mod png;
+mod render;
 mod texture;
 mod window;
+mod world;
 mod zip;
 
 use std::io;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use math::{to_srgb_u32, vec3};
+use camera::Camera;
+use math::vec3;
 use output::{FileOutput, Framebuffer, NullOutput, Output};
+use render::Renderer;
 use window::WindowOutput;
+use world::World;
 
 enum Mode {
     Window,
@@ -35,6 +42,8 @@ struct Args {
     width: usize,
     height: usize,
     frames: usize,
+    /// Override the worker count; used to measure scaling.
+    threads: Option<usize>,
 }
 
 impl Args {
@@ -44,6 +53,7 @@ impl Args {
             width: 900,
             height: 600,
             frames: 240,
+            threads: None,
         };
         let mut argv = std::env::args().skip(1);
         while let Some(arg) = argv.next() {
@@ -72,6 +82,7 @@ impl Args {
                         args.frames = n;
                     }
                 }
+                "--threads" => args.threads = argv.next().and_then(|v| v.parse().ok()),
                 "--width" => {
                     if let Some(n) = argv.next().and_then(|v| v.parse().ok()) {
                         args.width = n;
@@ -83,7 +94,7 @@ impl Args {
                     }
                 }
                 "--help" | "-h" => {
-                    println!("{}", USAGE);
+                    println!("{USAGE}");
                     std::process::exit(0);
                 }
                 other => {
@@ -103,31 +114,62 @@ usage: skyblock [--window | --render DIR | --bench N] [--frames N] [--width W] [
                    R reseeds, P screenshots, 1-4 set resolution scale, Esc quits
   --render DIR     write an orbit as PNG frames, no window
   --bench N        render N frames and report ms/frame
+  --threads N      force the worker count (default: all cores)
   --check-pack     decode textures from the resource pack and report findings
   --dump NAME OUT  decode one pack entry and write its raw RGBA bytes";
 
-/// Placeholder scene for phase 0: a sky gradient, so the whole pipeline
-/// (render -> framebuffer -> window/PNG) can be verified before any tracing exists.
-fn render_frame(frame: &mut Framebuffer, time: f32) {
-    let horizon = vec3(0.94, 0.65, 0.45);
-    let zenith = vec3(0.10, 0.16, 0.38);
-    let (w, h) = (frame.width, frame.height);
-    for y in 0..h {
-        let t = y as f32 / h.max(1) as f32;
-        let sky = zenith.lerp(horizon, t.powf(2.2));
-        for x in 0..w {
-            let sweep = ((x as f32 / w as f32) * 6.283 + time).sin() * 0.02;
-            frame.pixels[y * w + x] = to_srgb_u32(sky + vec3(sweep, sweep * 0.5, 0.0));
+/// Placeholder scene until procedural terrain lands: a plateau with a few pillars,
+/// enough to exercise traversal, faces and the camera.
+fn placeholder_world() -> World {
+    let size = 32usize;
+    let mut world = World::new([size, 24, size]);
+    for x in 0..size as i32 {
+        for z in 0..size as i32 {
+            let dx = x as f32 - 15.5;
+            let dz = z as f32 - 15.5;
+            let radius = (dx * dx + dz * dz).sqrt();
+            if radius > 15.0 {
+                continue;
+            }
+            let height = 6 - (radius * 0.25) as i32;
+            for y in 0..=height {
+                let block = if y == height { 1 } else { 2 };
+                world.set(x, y, z, block);
+            }
         }
     }
+    for (x, z) in [(10, 10), (21, 12), (14, 20)] {
+        for y in 7..11 {
+            world.set(x, y, z, 3);
+        }
+    }
+    world
+}
+
+fn scene_camera(world: &World) -> Camera {
+    let center = vec3(
+        world.size[0] as f32 * 0.5,
+        world.size[1] as f32 * 0.28,
+        world.size[2] as f32 * 0.5,
+    );
+    Camera::new(center, world.size[0] as f32 * 1.7)
 }
 
 fn run_headless(mut out: Box<dyn Output>, args: &Args, report: bool) -> io::Result<()> {
+    let world = placeholder_world();
+    let mut camera = scene_camera(&world);
     let mut frame = Framebuffer::new(args.width, args.height);
+    let mut renderer = Renderer::new();
+    if let Some(threads) = args.threads {
+        renderer.threads = threads;
+    }
+
     let start = Instant::now();
     let mut rendered = 0usize;
     loop {
-        render_frame(&mut frame, rendered as f32 * 0.05);
+        // A full turn over the requested frame count, so --render yields a loop.
+        camera.yaw = std::f32::consts::TAU * rendered as f32 / args.frames.max(1) as f32;
+        renderer.render(&mut frame, &world, &camera);
         rendered += 1;
         if !out.present(&frame)? {
             break;
@@ -136,9 +178,10 @@ fn run_headless(mut out: Box<dyn Output>, args: &Args, report: bool) -> io::Resu
     if report {
         let ms = start.elapsed().as_secs_f64() * 1000.0 / rendered as f64;
         println!(
-            "{rendered} frames at {}x{}: {ms:.2} ms/frame ({:.1} fps)",
+            "{rendered} frames at {}x{}, {} threads: {ms:.2} ms/frame ({:.1} fps)",
             args.width,
             args.height,
+            renderer.threads,
             1000.0 / ms
         );
     }
@@ -146,18 +189,31 @@ fn run_headless(mut out: Box<dyn Output>, args: &Args, report: bool) -> io::Resu
 }
 
 fn run_window(args: &Args) -> io::Result<()> {
+    let world = placeholder_world();
+    let mut camera = scene_camera(&world);
     let mut win = WindowOutput::new("Skyblock Diorama", args.width, args.height)?;
     let mut frame = Framebuffer::new(args.width, args.height);
+    let mut renderer = Renderer::new();
+    if let Some(threads) = args.threads {
+        renderer.threads = threads;
+    }
     let mut shots = 0usize;
-    let mut time = 0.0f32;
+    let mut quality = 1usize;
+
     while win.is_open() {
         let frame_start = Instant::now();
         let input = win.poll_input();
+        camera.apply(input.orbit, input.zoom);
+
+        if let Some(q) = input.quality {
+            quality = q;
+        }
+        // Drop resolution while the camera moves, restore it the moment it stops.
+        renderer.scale = if input.is_idle() { quality } else { quality.max(2) };
+
         let (w, h) = win.size();
         frame.resize(w, h);
-
-        time += 0.016;
-        render_frame(&mut frame, time);
+        renderer.render(&mut frame, &world, &camera);
 
         if input.screenshot {
             let path = PathBuf::from(format!("screenshot_{shots:03}.png"));
@@ -167,7 +223,13 @@ fn run_window(args: &Args) -> io::Result<()> {
         }
 
         let ms = frame_start.elapsed().as_secs_f64() * 1000.0;
-        win.set_status(&format!("{ms:.1} ms  {:.0} fps  {w}x{h}", 1000.0 / ms.max(0.001)));
+        win.set_status(&format!(
+            "{ms:.1} ms  {:.0} fps  {w}x{h}/{}  {} threads  dist {:.0}",
+            1000.0 / ms.max(0.001),
+            renderer.scale,
+            renderer.threads,
+            camera.distance
+        ));
         if !win.present(&frame)? {
             break;
         }
@@ -228,7 +290,49 @@ fn main() -> io::Result<()> {
             println!("rendering {} frames to {}", args.frames, dir.display());
             run_headless(Box::new(FileOutput::new(dir.clone(), args.frames)), &args, true)
         }
-        Mode::CheckPack { dump } => check_pack(dump.as_ref()),
         Mode::Bench => run_headless(Box::new(NullOutput::new(args.frames)), &args, true),
+        Mode::CheckPack { dump } => check_pack(dump.as_ref()),
+    }
+}
+
+#[cfg(test)]
+mod scene_tests {
+    use super::*;
+
+    #[test]
+    fn the_placeholder_island_is_visible_from_the_default_camera() {
+        let world = placeholder_world();
+        let camera = scene_camera(&world);
+        let (w, h) = (64usize, 48usize);
+        let mut hits = 0;
+        for y in 0..h {
+            for x in 0..w {
+                let ray = camera.ray(x, y, w, h, (0.5, 0.5));
+                if world.trace(&ray, 1000.0, |_| true).is_some() {
+                    hits += 1;
+                }
+            }
+        }
+        assert!(hits > w * h / 20, "island should cover part of the frame, hits={hits}");
+    }
+
+    #[test]
+    fn the_island_stays_in_frame_through_a_full_orbit() {
+        let world = placeholder_world();
+        let mut camera = scene_camera(&world);
+        let (w, h) = (64usize, 48usize);
+        for step in 0..8 {
+            camera.yaw = std::f32::consts::TAU * step as f32 / 8.0;
+            let mut hits = 0;
+            for y in 0..h {
+                for x in 0..w {
+                    let ray = camera.ray(x, y, w, h, (0.5, 0.5));
+                    if world.trace(&ray, 1000.0, |_| true).is_some() {
+                        hits += 1;
+                    }
+                }
+            }
+            assert!(hits > w * h / 20, "island vanished at yaw step {step}");
+        }
     }
 }
