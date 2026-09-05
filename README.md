@@ -25,8 +25,9 @@ recorrido DDA de vóxeles, mapas normales, skybox, y el planificador multihilo.
 cargo run --release                              # ventana interactiva
 cargo run --release -- --render out/ -n 240 --samples 8   # órbita a PNGs, sin ventana
 cargo run --release -- --bench 30                # medición de ms/frame
+cargo run --release -- --bench-idle 60           # medición del frame en reposo
 cargo run --release -- --check-pack              # verifica la carga del texture pack
-cargo test --release                             # 94 pruebas
+cargo test --release                             # 97 pruebas
 ```
 
 Opciones: `--width W --height H --seed N --threads N --samples N --sky-panorama
@@ -51,7 +52,9 @@ que es como se arma el video del ciclo.
 
 Mientras la cámara se mueve, el render baja de resolución para mantener la
 interacción fluida; al soltarla vuelve a resolución completa y **acumula muestras
-jittereadas** hasta converger, que es de donde sale el antialiasing.
+jittereadas** hasta converger, que es de donde sale el antialiasing. Ya convergida,
+solo se re-trazan los píxeles que siguen cambiando —el agua, el portal y sus
+reflejos—: el frame en reposo cuesta la mitad y la imagen no cambia.
 
 ## Texture pack
 
@@ -115,7 +118,15 @@ El ciclo de día y noche cuesta **~4.5 ms cada vez que rehornea el cielo** (medi
 ventana el cielo solo se rehornea al cruzar uno de los 96 pasos del día, así que con
 un día de 30 s son ~3 rehorneados por segundo: cerca del 1.5% del tiempo de frame.
 
-Reproducible con `--bench N --width W --height H --threads N [--cycle]`.
+Frames en reposo (cámara quieta, refinando), 640×520 con 16 hilos:
+
+| | ms/frame | píxeles trazados |
+|---|---|---|
+| Antes | 18.5 | 100% |
+| Con refresco selectivo | **10.0** | 37% |
+
+Reproducible con `--bench N` y `--bench-idle N`, más `--width W --height H
+--threads N [--cycle]`.
 
 ## Estructura
 

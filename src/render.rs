@@ -36,18 +36,38 @@ const MAX_LIGHTS_PER_HIT: usize = 3;
 /// A lantern contributing less than this is skipped before its shadow ray.
 const MIN_LIGHT_CONTRIBUTION: f32 = 0.012;
 
-/// Jittered samples accumulated once the camera stops moving. Past this the image
-/// stops changing visibly.
-pub const MAX_SAMPLES: usize = 16;
+/// Length of the running average used while the camera is still. The first frames
+/// converge (weights 1, 1/2, 1/3, ...); after that the weight stops shrinking, so
+/// the image keeps tracking the animated water and gate instead of freezing.
+pub const SAMPLE_WINDOW: usize = 16;
+
+/// Once the running average has settled, a pixel that is not changing is only
+/// re-traced every this many frames. Water, the gate and their reflections keep
+/// changing, so they stay on every frame; the still two thirds of the image do not.
+const IDLE_REFRESH: u32 = 8;
+/// How much a pixel has to move for it to count as still animating, in linear
+/// light. Roughly one step of an 8-bit channel.
+const ACTIVITY_EPSILON: f32 = 0.004;
 
 pub struct Renderer {
     pub threads: usize,
     /// 1 = full resolution, 2 = half, and so on. Raised while the camera moves.
     pub scale: usize,
     low: Vec<u32>,
-    /// Running sum of samples per pixel, for progressive refinement while idle.
+    /// Running average per pixel, for progressive refinement while idle.
     accumulator: Vec<Vec3>,
     pub samples: usize,
+    /// Per pixel: does this pixel still change from frame to frame?
+    active: Vec<bool>,
+    /// The previous frame's sample per pixel. Comparing sample against sample (not
+    /// against the running average, which is still catching up) is what makes the
+    /// activity test see the animation instead of the convergence.
+    previous: Vec<Vec3>,
+    /// Rays actually traced in the last `accumulate`, for the idle benchmark.
+    pub last_traced: usize,
+    /// Skip re-tracing quiet pixels once the image has settled. On by default; the
+    /// tests turn it off to compare against the full refinement.
+    pub selective_refresh: bool,
 }
 
 impl Default for Renderer {
@@ -64,6 +84,10 @@ impl Renderer {
             low: Vec::new(),
             accumulator: Vec::new(),
             samples: 0,
+            active: Vec::new(),
+            previous: Vec::new(),
+            last_traced: 0,
+            selective_refresh: true,
         }
     }
 
@@ -72,50 +96,100 @@ impl Renderer {
         self.samples = 0;
     }
 
-    /// True once the accumulator has nothing left to add.
-    pub fn is_converged(&self) -> bool {
-        self.samples >= MAX_SAMPLES
-    }
-
-    /// Add one jittered sample per pixel and show the running average.
+    /// Fold one jittered sample per pixel into the running average and show it.
     ///
-    /// Called only while the camera is still. Each pass offsets the ray inside the
-    /// pixel with a different low-discrepancy offset, so edges resolve into smooth
+    /// Called while the camera is still. Each pass offsets the ray inside the pixel
+    /// by a different low-discrepancy amount, so edges resolve into smooth
     /// gradients without ever tracing more than one ray per pixel per frame.
+    ///
+    /// A new sample weighs `1 / (n + 1)` while the window fills, then stays at
+    /// `1 / SAMPLE_WINDOW`. That floor is what keeps the picture tracking the
+    /// animated water and gate: a plain mean would freeze, and the previous fix —
+    /// throwing the average away and showing a single noisy sample so the
+    /// animation could move — made the image blink every sixteenth frame.
     pub fn accumulate(&mut self, frame: &mut Framebuffer, scene: &Scene, camera: &Camera) {
         let (w, h) = (frame.width, frame.height);
         if self.accumulator.len() != w * h || self.samples == 0 {
             self.accumulator.clear();
             self.accumulator.resize(w * h, Vec3::ZERO);
+            self.active.clear();
+            self.active.resize(w * h, true);
+            self.previous.clear();
+            self.previous.resize(w * h, Vec3::ZERO);
             self.samples = 0;
         }
-        if self.samples >= MAX_SAMPLES {
-            return;
-        }
 
-        let jitter = halton_2d(self.samples + 1);
+        // While the average converges, every frame uses a fresh sub-pixel offset:
+        // that is where the antialiasing comes from. Once it has converged the
+        // offset is frozen, so any remaining frame-to-frame difference is the
+        // animation itself — which is exactly what the activity test needs to see.
+        let settled_now = self.samples >= SAMPLE_WINDOW;
+        let jitter = halton_2d(if settled_now {
+            SAMPLE_WINDOW
+        } else {
+            self.samples + 1
+        });
         let threads = self.threads;
-        let previous = self.samples as f32;
-        let inv = 1.0 / (previous + 1.0);
+        let window = self.samples.min(SAMPLE_WINDOW - 1) as f32;
+        let weight = 1.0 / (window + 1.0);
+        // While the average is still converging every pixel is traced. After that,
+        // only the ones that are actually changing, plus a rotating slice of the
+        // rest so a pixel that starts moving again is picked up within a few frames.
+        let skip_quiet = settled_now && self.selective_refresh;
+        let phase = (self.samples as u32) % IDLE_REFRESH;
+        let traced = AtomicUsize::new(0);
 
         // The accumulator is striped exactly like the framebuffer, so a worker owns
         // the same rows in both and no locking is needed.
         let accumulator = &mut self.accumulator;
-        let mut pairs: Vec<(&mut [Vec3], &mut [u32])> = accumulator
-            .chunks_mut(w * ROWS_PER_STRIP)
-            .zip(frame.pixels.chunks_mut(w * ROWS_PER_STRIP))
+        let active = &mut self.active;
+        let previous = &mut self.previous;
+        let strip = w * ROWS_PER_STRIP;
+        let mut pairs: Vec<Strip> = accumulator
+            .chunks_mut(strip)
+            .zip(frame.pixels.chunks_mut(strip))
+            .zip(active.chunks_mut(strip))
+            .zip(previous.chunks_mut(strip))
+            .map(|(((sums, pixels), flags), last)| (sums, pixels, flags, last))
             .collect();
 
-        run_strips(&mut pairs, threads, |sums, pixels, first_row| {
-            for (i, sum) in sums.iter_mut().enumerate() {
-                let y = first_row + i / w;
-                let x = i % w;
-                let ray = camera.ray(x, y, w, h, jitter);
-                *sum += trace_color(scene, &ray);
-                pixels[i] = to_srgb_u32(*sum * inv);
-            }
-        });
-        self.samples += 1;
+        run_strips(
+            &mut pairs,
+            threads,
+            |average, pixels, flags, last, first_row| {
+                let mut count = 0usize;
+                for (i, slot) in average.iter_mut().enumerate() {
+                    let y = first_row + i / w;
+                    let x = i % w;
+                    // Settled and quiet: re-trace only on this pixel's turn, so a
+                    // pixel that starts moving again is noticed within a few frames.
+                    if skip_quiet
+                        && !flags[i]
+                        && ((x as u32 ^ ((y as u32) << 1)) % IDLE_REFRESH) != phase
+                    {
+                        continue;
+                    }
+                    let ray = camera.ray(x, y, w, h, jitter);
+                    let sample = trace_color(scene, &ray);
+                    count += 1;
+
+                    let was_active = flags[i];
+                    flags[i] = (sample - last[i]).length() > ACTIVITY_EPSILON;
+                    last[i] = sample;
+
+                    // A settled pixel that is not moving keeps the average it
+                    // converged to. Folding a frozen-jitter sample into it would
+                    // slowly undo the antialiasing for no reason.
+                    if !settled_now || flags[i] || was_active {
+                        *slot = slot.lerp(sample, weight);
+                        pixels[i] = to_srgb_u32(*slot);
+                    }
+                }
+                traced.fetch_add(count, Ordering::Relaxed);
+            },
+        );
+        self.last_traced = traced.load(Ordering::Relaxed);
+        self.samples = self.samples.saturating_add(1);
     }
 
     pub fn render(&mut self, frame: &mut Framebuffer, scene: &Scene, camera: &Camera) {
@@ -161,13 +235,16 @@ fn halton_2d(index: usize) -> (f32, f32) {
 
 /// Hand paired strips (accumulator sums and framebuffer pixels) to the worker
 /// pool. Same dynamic queue as `render_strips`, but carrying two buffers at once.
-fn run_strips<F>(items: &mut [(&mut [Vec3], &mut [u32])], threads: usize, render: F)
+/// The four per-pixel buffers a refinement pass touches, sliced into one strip.
+type Strip<'a> = (&'a mut [Vec3], &'a mut [u32], &'a mut [bool], &'a mut [Vec3]);
+
+fn run_strips<F>(items: &mut [Strip], threads: usize, render: F)
 where
-    F: Fn(&mut [Vec3], &mut [u32], usize) + Sync,
+    F: Fn(&mut [Vec3], &mut [u32], &mut [bool], &mut [Vec3], usize) + Sync,
 {
     if threads <= 1 || items.len() <= 1 {
-        for (index, (sums, pixels)) in items.iter_mut().enumerate() {
-            render(sums, pixels, index * ROWS_PER_STRIP);
+        for (index, (sums, pixels, flags, last)) in items.iter_mut().enumerate() {
+            render(sums, pixels, flags, last, index * ROWS_PER_STRIP);
         }
         return;
     }
@@ -186,12 +263,23 @@ where
                 }
                 // Swap the slices out of the queue so the borrow travels with the
                 // worker: each index is claimed once, so nothing is aliased.
-                let (mut sums, mut pixels) = {
+                let (mut sums, mut pixels, mut flags, mut last) = {
                     let mut guard = queue.lock().unwrap();
-                    let (sums, pixels) = &mut guard[index];
-                    (std::mem::take(sums), std::mem::take(pixels))
+                    let (sums, pixels, flags, last) = &mut guard[index];
+                    (
+                        std::mem::take(sums),
+                        std::mem::take(pixels),
+                        std::mem::take(flags),
+                        std::mem::take(last),
+                    )
                 };
-                render(&mut sums, &mut pixels, index * ROWS_PER_STRIP);
+                render(
+                    &mut sums,
+                    &mut pixels,
+                    &mut flags,
+                    &mut last,
+                    index * ROWS_PER_STRIP,
+                );
             });
         }
     });
@@ -613,6 +701,128 @@ mod tests {
             normals.len() > 3,
             "normal map produced {} distinct normals",
             normals.len()
+        );
+    }
+
+    #[test]
+    fn the_idle_image_never_jumps_once_it_has_settled() {
+        let Some(mut scene) = scene() else { return };
+        let camera = Camera::new(vec3(24.0, 34.0, 24.0), 80.0);
+        let mut frame = Framebuffer::new(96, 72);
+        let mut renderer = Renderer::new();
+
+        // Let the running average fill its window.
+        for _ in 0..SAMPLE_WINDOW {
+            renderer.accumulate(&mut frame, &scene, &camera);
+            scene.tick += 1;
+        }
+
+        // From here the picture must only drift with the animation. The bug this
+        // guards against threw the average away and showed a single noisy sample,
+        // which moved most of the frame at once.
+        let channel = |p: u32, shift: u32| ((p >> shift) & 0xFF) as i32;
+        for step in 0..24 {
+            let before = frame.pixels.clone();
+            renderer.accumulate(&mut frame, &scene, &camera);
+            scene.tick += 1;
+
+            let moved = before
+                .iter()
+                .zip(frame.pixels.iter())
+                .filter(|(a, b)| {
+                    [16, 8, 0]
+                        .iter()
+                        .any(|s| (channel(**a, *s) - channel(**b, *s)).abs() > 12)
+                })
+                .count();
+            assert!(
+                moved * 20 < before.len(),
+                "frame {step} changed {moved} of {} pixels: that is a blink",
+                before.len()
+            );
+        }
+        // And the average is never thrown away while the camera sits still.
+        assert!(renderer.samples >= SAMPLE_WINDOW + 24);
+    }
+
+    #[test]
+    fn selective_refresh_keeps_the_image_current() {
+        let Some(mut scene) = scene() else { return };
+        let camera = Camera::new(vec3(24.0, 34.0, 24.0), 80.0);
+        let mut refined = Framebuffer::new(120, 90);
+        let mut renderer = Renderer::new();
+
+        // Settle, then run well past the point where quiet pixels are only
+        // re-traced on their turn.
+        for _ in 0..SAMPLE_WINDOW + 40 {
+            renderer.accumulate(&mut refined, &scene, &camera);
+            scene.tick += 1;
+        }
+        assert!(
+            renderer.last_traced < 120 * 90,
+            "nothing was skipped: {} of {} pixels",
+            renderer.last_traced,
+            120 * 90
+        );
+
+        // The same refinement with skipping turned off: the selective image must
+        // match it, or quiet pixels are going stale.
+        let mut fresh = Framebuffer::new(120, 90);
+        let mut reference = Renderer::new();
+        reference.selective_refresh = false;
+        let mut replay = Scene::load(2024, &Pack::open(None).unwrap(), false, 0.16).unwrap();
+        for _ in 0..SAMPLE_WINDOW + 40 {
+            reference.accumulate(&mut fresh, &replay, &camera);
+            replay.tick += 1;
+        }
+
+        let channel = |p: u32, shift: u32| ((p >> shift) & 0xFF) as i32;
+        let far = refined
+            .pixels
+            .iter()
+            .zip(fresh.pixels.iter())
+            .filter(|(a, b)| {
+                [16, 8, 0]
+                    .iter()
+                    .any(|s| (channel(**a, *s) - channel(**b, *s)).abs() > 24)
+            })
+            .count();
+        assert!(
+            far * 40 < refined.pixels.len(),
+            "{far} of {} pixels drifted from the fully refreshed image",
+            refined.pixels.len()
+        );
+    }
+
+    #[test]
+    fn the_running_average_smooths_a_single_sample() {
+        let Some(scene) = scene() else { return };
+        let camera = Camera::new(vec3(24.0, 34.0, 24.0), 80.0);
+        let mut one = Framebuffer::new(80, 60);
+        let mut many = Framebuffer::new(80, 60);
+
+        let mut a = Renderer::new();
+        a.accumulate(&mut one, &scene, &camera);
+        let mut b = Renderer::new();
+        for _ in 0..SAMPLE_WINDOW {
+            b.accumulate(&mut many, &scene, &camera);
+        }
+
+        // Averaging jittered samples softens edges: neighbouring pixels differ less
+        // than in a single-sample frame.
+        let contrast = |f: &Framebuffer| -> i64 {
+            let mut total = 0i64;
+            for y in 0..f.height {
+                for x in 1..f.width {
+                    let (p, q) = (f.pixels[y * f.width + x], f.pixels[y * f.width + x - 1]);
+                    total += (((p >> 16) & 0xFF) as i64 - ((q >> 16) & 0xFF) as i64).abs();
+                }
+            }
+            total
+        };
+        assert!(
+            contrast(&many) < contrast(&one),
+            "the averaged frame should be smoother"
         );
     }
 

@@ -43,6 +43,8 @@ enum Mode {
     Window,
     Render { dir: PathBuf },
     Bench,
+    /// Time the idle path: accumulate frames with a still camera.
+    BenchIdle,
     /// Decode textures straight from the pack and report what was found.
     CheckPack { dump: Option<(String, PathBuf)> },
 }
@@ -95,6 +97,12 @@ impl Args {
                     args.mode = Mode::CheckPack {
                         dump: Some((name, out.into())),
                     };
+                }
+                "--bench-idle" => {
+                    args.mode = Mode::BenchIdle;
+                    if let Some(n) = argv.next().and_then(|v| v.parse().ok()) {
+                        args.frames = n;
+                    }
                 }
                 "--bench" => {
                     args.mode = Mode::Bench;
@@ -156,6 +164,7 @@ usage: skyblock [--window | --render DIR | --bench N] [--frames N] [--width W] [
                    R reseeds, P screenshots, 1-4 set resolution scale, Esc quits
   --render DIR     write an orbit as PNG frames, no window
   --bench N        render N frames and report ms/frame
+  --bench-idle N   time N refinement frames with a still camera
   --threads N      force the worker count (default: all cores)
   --seed N         terrain seed (R reseeds in the window)
   --sky-panorama   use the pack's panorama cubemap instead of the dusk sky
@@ -229,6 +238,39 @@ fn run_headless(mut out: Box<dyn Output>, args: &Args, report: bool) -> io::Resu
     Ok(())
 }
 
+/// Time the path the window takes when nobody is touching anything: a still
+/// camera folding one jittered sample per frame into the running average.
+fn bench_idle(args: &Args) -> io::Result<()> {
+    let mut scene = load_scene(args.seed, args.panorama_sky, args.time)?;
+    let camera = scene_camera(scene.world());
+    let mut frame = Framebuffer::new(args.width, args.height);
+    let mut renderer = Renderer::new();
+    if let Some(threads) = args.threads {
+        renderer.threads = threads;
+    }
+
+    let pixels = args.width * args.height;
+    let start = Instant::now();
+    let mut traced_total = 0usize;
+    for _ in 0..args.frames.max(1) {
+        renderer.accumulate(&mut frame, &scene, &camera);
+        scene.tick += 1;
+        traced_total += renderer.last_traced;
+    }
+    let frames = args.frames.max(1);
+    let ms = start.elapsed().as_secs_f64() * 1000.0 / frames as f64;
+    println!(
+        "{frames} idle frames at {}x{}, {} threads: {ms:.2} ms/frame ({:.1} fps), \
+tracing {:.0}% of the pixels",
+        args.width,
+        args.height,
+        renderer.threads,
+        1000.0 / ms,
+        100.0 * traced_total as f64 / (frames * pixels) as f64
+    );
+    Ok(())
+}
+
 fn run_window(args: &Args) -> io::Result<()> {
     let mut scene = load_scene(args.seed, args.panorama_sky, args.time)?;
     let mut camera = scene_camera(scene.world());
@@ -286,15 +328,12 @@ fn run_window(args: &Args) -> io::Result<()> {
             renderer.reset_accumulation();
             scene.tick += 1;
         } else {
+            // Still camera: keep folding jittered samples into the running average.
+            // The animation keeps running, and the average tracks it instead of
+            // being thrown away, which is what used to make the image blink.
             renderer.scale = quality;
-            if renderer.is_converged() {
-                // Converged: only redraw to advance water and portal animation.
-                renderer.render(&mut frame, &scene, &camera);
-                renderer.reset_accumulation();
-                scene.tick += 1;
-            } else {
-                renderer.accumulate(&mut frame, &scene, &camera);
-            }
+            renderer.accumulate(&mut frame, &scene, &camera);
+            scene.tick += 1;
         }
 
         if input.screenshot {
@@ -376,6 +415,7 @@ fn main() -> io::Result<()> {
             run_headless(Box::new(FileOutput::new(dir.clone(), args.frames)), &args, true)
         }
         Mode::Bench => run_headless(Box::new(NullOutput::new(args.frames)), &args, true),
+        Mode::BenchIdle => bench_idle(&args),
         Mode::CheckPack { dump } => check_pack(dump.as_ref()),
     }
 }
