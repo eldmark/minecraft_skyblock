@@ -28,11 +28,14 @@ cargo run --release -- --bench 30                # medición de ms/frame
 cargo run --release -- --bench-idle 60           # medición del frame en reposo
 cargo run --release -- --bench-move 60           # medición del frame mientras se arrastra
 cargo run --release -- --check-pack              # verifica la carga del texture pack
-cargo test --release                             # 103 pruebas
+cargo test --release                             # 110 pruebas
 ```
 
 Opciones: `--width W --height H --seed N --threads N --samples N --sky-panorama
---time T --cycle`.
+--time T --cycle --eye X,Y,Z --look YAW,PITCH`.
+
+`--eye` y `--look` plantan la cámara libre en un punto concreto para el render
+offline, útil para capturas desde dentro de la escena o desde debajo de la isla.
 
 `--time T` fija la hora (`0` amanecer, `0.25` mediodía, `0.5` atardecer, `0.75`
 medianoche) y `--cycle` barre un día completo a lo largo de los frames de `--render`,
@@ -42,8 +45,13 @@ que es como se arma el video del ciclo.
 
 | Tecla / acción | Efecto |
 |---|---|
-| Arrastrar mouse, flechas | Orbitar la cámara |
-| Scroll, `W` / `S` | Acercar / alejar |
+| `F` | Alternar entre **órbita** y **vuelo libre** |
+| Arrastrar mouse, flechas | Orbitar / mirar alrededor |
+| Scroll | Acercar / alejar |
+| `W` / `S` | Acercar-alejar (órbita) · avanzar-retroceder (vuelo) |
+| `A` / `D` | Desplazarse a los lados (vuelo) |
+| `Espacio` / `Shift` | Subir / bajar (vuelo) |
+| `Ctrl` | Correr (vuelo) |
 | `D` | Arrancar / detener el **ciclo de día y noche** |
 | `,` / `.` | Mover la hora a mano |
 | `R` | Regenerar el terreno con otra semilla |
@@ -74,7 +82,7 @@ El programa lee las texturas directamente del ZIP con su propio DEFLATE.
 |---|---|
 | Terreno procedural 48×48 (supera el mínimo de 16×16) | `terrain.rs` — Perlin/fBm propio, isla con estalactita, montículo rocoso, río con dos cascadas, vetas de mineral, árboles |
 | Complejidad de escena | `structures.rs` — templo, gran árbol, puente, ruina |
-| Rotación y zoom de cámara | `camera.rs` — cámara orbital con pitch acotado y zoom multiplicativo |
+| Rotación y zoom de cámara | `camera.rs` — órbita con pitch acotado y zoom multiplicativo, más vuelo libre con `F` |
 | 5 materiales con textura y parámetros propios | `assets.rs` — terreno, agua, metal, emisivo, cristal |
 | Refracción | `render.rs` — Snell con reflexión interna total; agua y puerta de cristal |
 | Reflexión | `render.rs` — Fresnel de Schlick; oro, hierro, diamante, agua |

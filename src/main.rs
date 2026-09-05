@@ -31,8 +31,8 @@ use std::io;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use camera::Camera;
-use math::vec3;
+use camera::{Camera, Mode as CameraMode};
+use math::{vec3, Vec3};
 use output::{FileOutput, Framebuffer, NullOutput, Output};
 use render::Renderer;
 use scene::Scene;
@@ -68,6 +68,10 @@ struct Args {
     time: f32,
     /// Offline: sweep a full day across the rendered frames.
     cycle: bool,
+    /// Offline: render from this free-flight eye instead of orbiting.
+    eye: Option<Vec3>,
+    /// Yaw and pitch, in radians, for `--eye`.
+    look: (f32, f32),
 }
 
 impl Args {
@@ -83,6 +87,8 @@ impl Args {
             samples: 1,
             time: 0.16,
             cycle: false,
+            eye: None,
+            look: (0.9, 0.2),
         };
         let mut argv = std::env::args().skip(1);
         while let Some(arg) = argv.next() {
@@ -135,6 +141,24 @@ impl Args {
                     }
                 }
                 "--cycle" => args.cycle = true,
+                "--eye" => {
+                    if let Some(v) = argv.next() {
+                        let parts: Vec<f32> =
+                            v.split(',').filter_map(|p| p.trim().parse().ok()).collect();
+                        if let [x, y, z] = parts[..] {
+                            args.eye = Some(vec3(x, y, z));
+                        }
+                    }
+                }
+                "--look" => {
+                    if let Some(v) = argv.next() {
+                        let parts: Vec<f32> =
+                            v.split(',').filter_map(|p| p.trim().parse().ok()).collect();
+                        if let [yaw, pitch] = parts[..] {
+                            args.look = (yaw, pitch);
+                        }
+                    }
+                }
                 "--samples" => {
                     if let Some(n) = argv.next().and_then(|v| v.parse().ok()) {
                         args.samples = n;
@@ -168,8 +192,9 @@ impl Args {
 const USAGE: &str = "\
 usage: skyblock [--window | --render DIR | --bench N] [--frames N] [--width W] [--height H]
 
-  --window         live window (default): drag to orbit, scroll or W/S to zoom,
-                   R reseeds, P screenshots, 1-4 set resolution scale, Esc quits
+  --window         live window (default): drag to look, scroll or W/S to zoom,
+                   F toggles free flight (WASD, Space/Shift, Ctrl sprints),
+                   D runs the day/night cycle, R reseeds, P screenshots, Esc quits
   --render DIR     write an orbit as PNG frames, no window
   --bench N        render N frames and report ms/frame
   --bench-idle N   time N refinement frames with a still camera
@@ -180,6 +205,8 @@ usage: skyblock [--window | --render DIR | --bench N] [--frames N] [--width W] [
   --samples N      jittered samples per offline frame (antialiasing)
   --time T         time of day in [0,1): 0 sunrise, .25 noon, .5 sunset, .75 night
   --cycle          offline: sweep a full day/night cycle across the frames
+  --eye X,Y,Z      offline: render from this point instead of orbiting
+  --look YAW,PITCH radians, for --eye (default 0.9,0.2)
   --check-pack     decode textures from the resource pack and report findings
   --dump NAME OUT  decode one pack entry and write its raw RGBA bytes";
 
@@ -188,6 +215,20 @@ usage: skyblock [--window | --render DIR | --bench N] [--frames N] [--width W] [
 fn load_scene(seed: u32, panorama_sky: bool, time: f32) -> io::Result<Scene> {
     let pack = pack::Pack::open(None).map_err(io::Error::other)?;
     Scene::load(seed, &pack, panorama_sky, time).map_err(io::Error::other)
+}
+
+/// The camera an offline render uses: orbiting by default, or planted at a fixed
+/// point when `--eye` is given, which is the same free-flight camera the window
+/// drives with F.
+fn offline_camera(world: &World, args: &Args) -> Camera {
+    let mut camera = scene_camera(world);
+    if let Some(eye) = args.eye {
+        camera.set_mode(CameraMode::Free);
+        camera.position = eye;
+        camera.yaw = args.look.0;
+        camera.pitch = args.look.1;
+    }
+    camera
 }
 
 fn scene_camera(world: &World) -> Camera {
@@ -203,7 +244,7 @@ fn scene_camera(world: &World) -> Camera {
 
 fn run_headless(mut out: Box<dyn Output>, args: &Args, report: bool) -> io::Result<()> {
     let mut scene = load_scene(args.seed, args.panorama_sky, args.time)?;
-    let mut camera = scene_camera(scene.world());
+    let mut camera = offline_camera(scene.world(), args);
     let mut frame = Framebuffer::new(args.width, args.height);
     let mut renderer = Renderer::new();
     if let Some(threads) = args.threads {
@@ -214,7 +255,10 @@ fn run_headless(mut out: Box<dyn Output>, args: &Args, report: bool) -> io::Resu
     let mut rendered = 0usize;
     loop {
         // A full turn over the requested frame count, so --render yields a loop.
-        camera.yaw = std::f32::consts::TAU * rendered as f32 / args.frames.max(1) as f32;
+        // With --eye the camera is planted instead, and only the clock may move.
+        if args.eye.is_none() {
+            camera.yaw = std::f32::consts::TAU * rendered as f32 / args.frames.max(1) as f32;
+        }
         if args.cycle {
             // One full day across the sequence, so the clip shows both states.
             scene.set_time(args.time + rendered as f32 / args.frames.max(1) as f32);
@@ -334,7 +378,27 @@ fn run_window(args: &Args) -> io::Result<()> {
     while win.is_open() {
         let frame_start = Instant::now();
         let input = win.poll_input();
-        camera.apply(input.orbit, input.zoom);
+        if input.toggle_free {
+            let next = match camera.mode {
+                CameraMode::Orbit => CameraMode::Free,
+                CameraMode::Free => CameraMode::Orbit,
+            };
+            camera.set_mode(next);
+            println!(
+                "camera: {}",
+                match next {
+                    CameraMode::Orbit => "orbiting the island",
+                    CameraMode::Free => "free flight (WASD, Space/Shift, Ctrl to sprint)",
+                }
+            );
+        }
+        match camera.mode {
+            CameraMode::Orbit => camera.apply(input.orbit, input.zoom),
+            CameraMode::Free => {
+                camera.look(input.orbit);
+                camera.fly(input.move_axes, last_frame_seconds, input.boost);
+            }
+        }
 
         if input.toggle_cycle {
             scene.toggle_cycle();
@@ -403,11 +467,14 @@ fn run_window(args: &Args) -> io::Result<()> {
         let ms = frame_start.elapsed().as_secs_f64() * 1000.0;
         last_frame_seconds = (ms / 1000.0) as f32;
         win.set_status(&format!(
-            "{ms:.1} ms  {:.0} fps  {w}x{h}/{}  {} threads  {} spp  {} {}",
+            "{ms:.1} ms  {:.0} fps  {w}x{h}  {} threads  {} spp  {}  {} {}",
             1000.0 / ms.max(0.001),
-            renderer.scale,
             renderer.threads,
             renderer.samples.max(1),
+            match camera.mode {
+                CameraMode::Orbit => "orbit (F: fly)",
+                CameraMode::Free => "free flight (F: orbit)",
+            },
             scene.clock(),
             if scene.cycle_running { "(D: running)" } else { "(D: paused)" }
         ));

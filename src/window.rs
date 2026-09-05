@@ -19,6 +19,12 @@ pub struct Input {
     pub toggle_cycle: bool,
     /// `,` and `.` nudge the clock by hand, in fractions of a day.
     pub time_nudge: f32,
+    /// `F` swaps between orbiting the island and flying freely.
+    pub toggle_free: bool,
+    /// Free flight: (forward, right, up), each in `[-1, 1]`.
+    pub move_axes: (f32, f32, f32),
+    /// Left Ctrl: fly faster.
+    pub boost: bool,
 }
 
 impl Input {
@@ -29,6 +35,8 @@ impl Input {
             && self.quality.is_none()
             && !self.toggle_cycle
             && self.time_nudge == 0.0
+            && !self.toggle_free
+            && self.move_axes == (0.0, 0.0, 0.0)
     }
 }
 
@@ -95,12 +103,21 @@ impl WindowOutput {
         if let Some((_, wheel)) = self.window.get_scroll_wheel() {
             input.zoom -= wheel;
         }
-        if self.window.is_key_down(Key::W) {
-            input.zoom -= 0.5;
-        }
-        if self.window.is_key_down(Key::S) {
-            input.zoom += 0.5;
-        }
+
+        // W/S mean "closer/further" while orbiting and "forward/back" while
+        // flying; the caller picks which reading to use, so both are reported.
+        let axis = |window: &Window, positive: Key, negative: Key| -> f32 {
+            (window.is_key_down(positive) as i32 - window.is_key_down(negative) as i32) as f32
+        };
+        let forward = axis(&self.window, Key::W, Key::S);
+        input.zoom -= forward * 0.5;
+        input.move_axes = (
+            forward,
+            axis(&self.window, Key::D, Key::A),
+            axis(&self.window, Key::Space, Key::LeftShift),
+        );
+        input.boost = self.window.is_key_down(Key::LeftCtrl);
+        input.toggle_free = self.window.is_key_pressed(Key::F, minifb::KeyRepeat::No);
 
         input.reseed = self.window.is_key_pressed(Key::R, minifb::KeyRepeat::No);
         input.toggle_cycle = self.window.is_key_pressed(Key::D, minifb::KeyRepeat::No);
