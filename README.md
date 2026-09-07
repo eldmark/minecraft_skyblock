@@ -5,6 +5,7 @@ cero en Rust. **Todo el cómputo corre en CPU**: sin OpenGL, sin shaders, sin GP
 
 ![Vista general](screenshots/overview.png)
 ![La puerta de cristal](screenshots/gate.png)
+![La cabeza del dragón](screenshots/dragon.png)
 
 Ciclo de día y noche — la misma escena a mediodía y a medianoche:
 
@@ -28,7 +29,7 @@ cargo run --release -- --bench 30                # medición de ms/frame
 cargo run --release -- --bench-idle 60           # medición del frame en reposo
 cargo run --release -- --bench-move 60           # medición del frame mientras se arrastra
 cargo run --release -- --check-pack              # verifica la carga del texture pack
-cargo test --release                             # 110 pruebas
+cargo test --release                             # 112 pruebas
 ```
 
 Opciones: `--width W --height H --seed N --threads N --samples N --sky-panorama
@@ -81,7 +82,7 @@ El programa lee las texturas directamente del ZIP con su propio DEFLATE.
 | Elemento | Dónde |
 |---|---|
 | Terreno procedural 48×48 (supera el mínimo de 16×16) | `terrain.rs` — Perlin/fBm propio, isla con estalactita, montículo rocoso, río con dos cascadas, vetas de mineral, árboles |
-| Complejidad de escena | `structures.rs` — templo, gran árbol, puente, ruina |
+| Complejidad de escena | `structures.rs` — templo, dragón enrollado, gran árbol, puente, ruina |
 | Rotación y zoom de cámara | `camera.rs` — órbita con pitch acotado y zoom multiplicativo, más vuelo libre con `F` |
 | 5 materiales con textura y parámetros propios | `assets.rs` — terreno, agua, metal, emisivo, cristal |
 | Refracción | `render.rs` — Snell con reflexión interna total; agua y puerta de cristal |
@@ -95,8 +96,10 @@ El programa lee las texturas directamente del ZIP con su propio DEFLATE.
 ## La escena
 
 Siguiendo el diorama de referencia: isla flotante con un **templo de columnas** y su
-puerta de cristal iluminada, un **dragón de obsidiana** encabritado sobre la cumbrera, con lomo de esmeralda y
-ojos de glowstone, un **gran árbol** sobre un afloramiento rocoso, un **río**
+puerta de cristal iluminada, un **dragón blanco y rojo enrollado alrededor del
+templo** —lana blanca, cresta de lana y concreto rojo, espinas negras, garganta de
+netherrack y ojos de glowstone— que da vuelta y media a la columnata y saca la
+cabeza por encima de la cumbrera, un **gran árbol** sobre un afloramiento rocoso, un **río**
 que cruza la isla y cae por los dos bordes, un **puente de piedra** con linternas, y
 una **ruina** de columnas rotas en primer plano. Debajo, vetas de oro, hierro y
 diamante que solo se ven al orbitar por abajo.
@@ -161,7 +164,7 @@ src/
   noise.rs       Perlin 2D/3D y fBm
   daylight.rs    ciclo día/noche: sol, luna, paletas de cielo y ambiente
   terrain.rs     generación procedural de la isla, el montículo y el río
-  structures.rs  templo, gran árbol, puente, ruina y las luces
+  structures.rs  templo, dragón, gran árbol, puente, ruina y las luces
   world.rs       grid de vóxeles + DDA
   camera.rs      cámara orbital
   skybox.rs      cielo procedural y cubemap

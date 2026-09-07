@@ -322,6 +322,76 @@ impl Assets {
                 Material::diffuse(3.0).with_emission(0.25),
             ),
             (
+                // The dragon's hide. Wool is matte and slightly fuzzy, which is
+                // what keeps a white animal from turning into a white glare
+                // against the quartz temple it is coiled around.
+                blocks::WHITE_WOOL,
+                "white_wool",
+                "white_wool",
+                "white_wool",
+                Material {
+                    specular: 0.10,
+                    shininess: 12.0,
+                    normal_strength: 2.5,
+                    ..Material::default()
+                },
+            ),
+            (
+                blocks::RED_WOOL,
+                "red_wool",
+                "red_wool",
+                "red_wool",
+                Material {
+                    specular: 0.10,
+                    shininess: 12.0,
+                    normal_strength: 2.5,
+                    ..Material::default()
+                },
+            ),
+            (
+                // Concrete is flat and hard next to the wool: the crest and the
+                // scales read as a different surface, not just a different color.
+                blocks::RED_CONCRETE,
+                "red_concrete",
+                "red_concrete",
+                "red_concrete",
+                Material {
+                    specular: 0.20,
+                    shininess: 30.0,
+                    reflectivity: 0.04,
+                    normal_strength: 1.5,
+                    ..Material::default()
+                },
+            ),
+            (
+                // Netherrack breaks up the red with its own grain, and glows
+                // faintly inside the open jaw.
+                blocks::NETHERRACK,
+                "netherrack",
+                "netherrack",
+                "netherrack",
+                Material {
+                    specular: 0.12,
+                    shininess: 16.0,
+                    normal_strength: 4.0,
+                    ..Material::default()
+                }
+                .with_emission(0.12),
+            ),
+            (
+                blocks::BLACK_CONCRETE,
+                "black_concrete",
+                "black_concrete",
+                "black_concrete",
+                Material {
+                    specular: 0.28,
+                    shininess: 42.0,
+                    reflectivity: 0.06,
+                    normal_strength: 1.5,
+                    ..Material::default()
+                },
+            ),
+            (
                 blocks::FLOWERING_LEAVES,
                 "flowering_azalea_leaves",
                 "flowering_azalea_leaves",

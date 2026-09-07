@@ -36,8 +36,13 @@ pub const OBSIDIAN: Block = 29;
 pub const CRYING_OBSIDIAN: Block = 30;
 pub const EMERALD_BLOCK: Block = 31;
 pub const REDSTONE_BLOCK: Block = 32;
+pub const WHITE_WOOL: Block = 33;
+pub const RED_WOOL: Block = 34;
+pub const RED_CONCRETE: Block = 35;
+pub const NETHERRACK: Block = 36;
+pub const BLACK_CONCRETE: Block = 37;
 
-pub const COUNT: usize = 33;
+pub const COUNT: usize = 38;
 
 /// Blocks that emit light of their own.
 pub fn is_emissive(block: Block) -> bool {
@@ -81,6 +86,11 @@ pub fn name(block: Block) -> &'static str {
         CRYING_OBSIDIAN => "crying_obsidian",
         EMERALD_BLOCK => "emerald_block",
         REDSTONE_BLOCK => "redstone_block",
+        WHITE_WOOL => "white_wool",
+        RED_WOOL => "red_wool",
+        RED_CONCRETE => "red_concrete",
+        NETHERRACK => "netherrack",
+        BLACK_CONCRETE => "black_concrete",
         _ => "unknown",
     }
 }

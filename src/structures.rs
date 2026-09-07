@@ -24,7 +24,7 @@ const RUIN: (i32, i32) = (13, 38);
 pub fn place_all(island: &mut Island) {
     let base = level(island, TEMPLE.0, TEMPLE.1, TEMPLE_W, TEMPLE_D, 1);
     let ridge = temple(island, TEMPLE.0, TEMPLE.1, base);
-    dragon(island, TEMPLE.0 + TEMPLE_W / 2, TEMPLE.1 + TEMPLE_D / 2, ridge + 1);
+    dragon(island, TEMPLE.0 + TEMPLE_W / 2, TEMPLE.1 + TEMPLE_D / 2, base, ridge);
     great_tree(island);
     bridge(island);
     ruin(island);
@@ -198,114 +198,235 @@ fn temple(island: &mut Island, x0: i32, z0: i32, base: i32) -> i32 {
     column_top + 2 + courses
 }
 
-/// A dragon reared up on the temple's ridge, built out of blocks.
+/// The dragon, coiled around the temple.
 ///
-/// Obsidian for the hide — dark volcanic glass, shiny enough that it picks up every
-/// lantern around the temple and the sunset behind it — with an emerald spine and
-/// belly, redstone in the jaw and glowstone eyes that carry it through the night.
+/// A serpentine wyrm following the reference build: white wool hide, dark red
+/// crest and barbs, black spine tips. It spirals a turn and three quarters
+/// around the colonnade — wide and low at the tail, tightening as it climbs —
+/// and lifts its head out over the entrance, at the height of the roof ridge.
 ///
-/// Two things decide whether it reads as an animal at this scale. It stands
-/// **across** the temple, along x, so the default view sees its whole profile;
-/// an earlier version aligned with the view axis read as a totem pole. And every
-/// part is a solid box, never a line of single blocks, which at this size looks
-/// like a stick rather than a limb.
-fn dragon(island: &mut Island, cx: i32, cz: i32, y: i32) {
+/// Three things make it read as an animal at this scale:
+///
+/// * The path is a **single spiral sampled densely and stamped with spheres**,
+///   not a chain of boxes. A tube that curves around the building is what turns
+///   a pile of blocks into a body; the previous dragon was axis-aligned boxes
+///   and read as furniture.
+/// * The **crest, spines and barbs stick out of the silhouette**. The animal is
+///   recognised by its outline long before its texture, and a smooth tube in
+///   white wool would just be a pipe.
+/// * It only ever writes into **air**. The coil is sized to clear the temple,
+///   but where it does not, the body passes behind the columns instead of
+///   eating them.
+fn dragon(island: &mut Island, cx: i32, cz: i32, base: i32, ridge: i32) {
     let world = &mut island.world;
+
+    fn put(world: &mut World, x: i32, y: i32, z: i32, block: Block) {
+        if world.get(x, y, z) == AIR {
+            world.set(x, y, z, block);
+        }
+    }
+
+    /// The head is carved out of the end of the coil, so unlike the rest of the
+    /// body it is allowed to replace the dragon's own blocks — but still not the
+    /// temple's.
+    fn carve(world: &mut World, x: i32, y: i32, z: i32, block: Block) {
+        if matches!(
+            world.get(x, y, z),
+            AIR | WHITE_WOOL | RED_WOOL | RED_CONCRETE | BLACK_CONCRETE | NETHERRACK
+        ) {
+            world.set(x, y, z, block);
+        }
+    }
 
     fn box_of(world: &mut World, from: (i32, i32, i32), to: (i32, i32, i32), block: Block) {
         for yy in from.1..=to.1 {
             for zz in from.2..=to.2 {
                 for xx in from.0..=to.0 {
-                    world.set(xx, yy, zz, block);
+                    carve(world, xx, yy, zz, block);
                 }
             }
         }
     }
 
-    // Hind legs: thick, planted on the ridge, carrying the reared-up body.
-    for dz in [-1i32, 1] {
-        box_of(
-            world,
-            (cx + 2, y, cz + dz),
-            (cx + 3, y + 2, cz + dz),
-            OBSIDIAN,
-        );
-        // Foot.
-        world.set(cx + 1, y, cz + dz, OBSIDIAN);
+    // Deterministic speckle: the red is mixed by position, not by a counter, so
+    // the pattern does not drift when the coil is re-sampled.
+    fn speckle(x: i32, y: i32, z: i32) -> u32 {
+        let mut h = (x as u32)
+            .wrapping_mul(0x9E37_79B9)
+            .wrapping_add((y as u32).wrapping_mul(0x85EB_CA6B))
+            ^ (z as u32).wrapping_mul(0xC2B2_AE35);
+        h ^= h >> 13;
+        h = h.wrapping_mul(0x27D4_EB2F);
+        h >> 7
     }
 
-    // Body: three deep, three tall, sloping up towards the chest.
-    box_of(world, (cx - 2, y + 2, cz - 1), (cx + 4, y + 4, cz + 1), OBSIDIAN);
-    // Belly plates.
-    box_of(world, (cx - 1, y + 2, cz - 1), (cx + 3, y + 2, cz + 1), EMERALD_BLOCK);
-    // Spine along the back.
-    box_of(world, (cx - 1, y + 5, cz), (cx + 3, y + 5, cz), EMERALD_BLOCK);
+    let tau = std::f32::consts::TAU;
+    // The spiral ends on the right-hand corner of the temple rather than dead
+    // centre: the head then looks *across* the facade, and the default camera
+    // sees it in profile instead of nose-on and foreshortened.
+    let turns = 1.5;
+    let head_angle = 0.22 * tau;
+    let y_tail = (base + 2) as f32;
+    let y_head = (ridge + 5) as f32;
 
-    // Chest and shoulders, where the neck and the wings meet the body.
-    box_of(world, (cx - 4, y + 3, cz - 1), (cx - 2, y + 5, cz + 1), OBSIDIAN);
+    // t = 0 at the tail tip, t = 1 at the base of the skull.
+    let point = |t: f32| -> (f32, f32, f32) {
+        let a = (t - 1.0) * turns * tau + head_angle;
+        // The spiral tightens as it climbs, so the animal looks like it is
+        // squeezing the building rather than orbiting it.
+        let rx = 9.6 - 2.0 * t;
+        let rz = 8.6 - 1.7 * t;
+        // It stays low for most of the spiral and rears up at the end. A
+        // symmetric curve put the front pass right across the lit gate, which
+        // is the one thing on the facade that has to stay visible.
+        let climb = t.powf(2.2);
+        (
+            cx as f32 + rx * a.sin(),
+            y_tail + (y_head - y_tail) * climb,
+            cz as f32 + rz * a.cos(),
+        )
+    };
 
-    // Front legs, shorter, tucked under the chest.
-    for dz in [-1i32, 1] {
-        box_of(world, (cx - 3, y + 1, cz + dz), (cx - 3, y + 2, cz + dz), OBSIDIAN);
-        world.set(cx - 4, y + 1, cz + dz, OBSIDIAN);
-    }
+    // Thickness: nothing at the two ends, thickest through the shoulders.
+    let girth = |t: f32| -> f32 { 0.55 + 1.05 * (4.0 * t * (1.0 - t)).powf(0.55) };
 
-    // Neck: two thick, curving up and forward over the temple's entrance.
-    // The neck climbs more than it reaches: in the reference the head sits over
-    // the chest, not out in front of it.
-    let neck = [(cx - 5, y + 5), (cx - 6, y + 6), (cx - 6, y + 7)];
-    for (nx, ny) in neck {
-        box_of(world, (nx, ny, cz - 1), (nx, ny + 1, cz + 1), OBSIDIAN);
-        world.set(nx, ny + 2, cz, EMERALD_BLOCK); // crest running up the neck
-    }
+    const SAMPLES: usize = 260;
+    for i in 0..=SAMPLES {
+        let t = i as f32 / SAMPLES as f32;
+        let (px, py, pz) = point(t);
+        let r = girth(t);
+        let reach = r.ceil() as i32;
 
-    // Head: a wedge with a jaw that opens forward and down.
-    let (hx, hy) = (cx - 8, y + 8);
-    box_of(world, (hx, hy, cz - 1), (hx + 2, hy + 1, cz + 1), OBSIDIAN);
-    // Snout.
-    box_of(world, (hx - 2, hy, cz - 1), (hx - 1, hy, cz + 1), OBSIDIAN);
-    // Open jaw, lit from inside.
-    box_of(world, (hx - 2, hy - 1, cz), (hx, hy - 1, cz), REDSTONE_BLOCK);
-    // Eyes on both cheeks: what is left of the dragon after dark.
-    world.set(hx + 1, hy + 1, cz - 1, GLOWSTONE);
-    world.set(hx + 1, hy + 1, cz + 1, GLOWSTONE);
-    // Horns sweeping back off the skull.
-    for step in 0..3 {
-        for dz in [-1i32, 1] {
-            world.set(hx + 2 + step, hy + 2 + step / 2, cz + dz, OBSIDIAN);
-        }
-    }
-
-    // Tail: leaves the hips, drops, then sweeps up and back, thinning as it goes.
-    let tail = [
-        (cx + 5, y + 3, 1),
-        (cx + 6, y + 3, 1),
-        (cx + 7, y + 4, 0),
-        (cx + 8, y + 5, 0),
-        (cx + 9, y + 5, 0),
-    ];
-    for (tx, ty, half) in tail {
-        box_of(world, (tx, ty, cz - half), (tx, ty + 1, cz + half), OBSIDIAN);
-        world.set(tx, ty + 2, cz, EMERALD_BLOCK);
-    }
-
-    // Wings: angular membranes off the shoulders, rising as they reach out. Two
-    // courses thick at the root so they read as wings rather than as fins.
-    // Wings stay small and swept back, as in the reference: big spread wings
-    // covered the body from the default view and the animal disappeared behind
-    // its own membranes.
-    for side in [-1i32, 1] {
-        for step in 1..=3 {
-            let z = cz + side * (1 + step);
-            let lift = y + 4 + step;
-            let reach = 3 - step;
-            box_of(world, (cx - 1, lift, z), (cx - 1 + reach, lift, z), OBSIDIAN);
-            if step == 1 {
-                box_of(world, (cx - 1, lift - 1, z), (cx + 1, lift - 1, z), OBSIDIAN);
+        for dy in -reach..=reach {
+            for dz in -reach..=reach {
+                for dx in -reach..=reach {
+                    let (x, y, z) = (
+                        px.round() as i32 + dx,
+                        py.round() as i32 + dy,
+                        pz.round() as i32 + dz,
+                    );
+                    let (ox, oy, oz) = (x as f32 - px, y as f32 - py, z as f32 - pz);
+                    let d = (ox * ox + oy * oy + oz * oz).sqrt();
+                    if d > r {
+                        continue;
+                    }
+                    // White hide with a few red scales mixed in; the crest is
+                    // painted on top afterwards so it stays one block wide
+                    // instead of swallowing the whole back.
+                    let block = if speckle(x, y, z) % 11 == 0 {
+                        RED_WOOL
+                    } else {
+                        WHITE_WOOL
+                    };
+                    put(world, x, y, z, block);
+                }
             }
-            // Red tip at the leading edge, as in the reference build.
-            world.set(cx - 1, lift, z, REDSTONE_BLOCK);
         }
+
+        // The crest: one course of red along the top of the back, with a black
+        // spine standing out of it every few samples.
+        let (x, z) = (px.round() as i32, pz.round() as i32);
+        let top = (py + r).floor() as i32;
+        put(
+            world,
+            x,
+            top,
+            z,
+            if speckle(x, top, z) % 4 == 0 {
+                RED_CONCRETE
+            } else {
+                RED_WOOL
+            },
+        );
+        if i % 12 == 0 && (0.05..0.94).contains(&t) {
+            put(world, x, top + 1, z, RED_CONCRETE);
+            put(world, x, top + 2, z, BLACK_CONCRETE);
+        }
+
+        // Barbs off the flanks, alternating sides, following the reference's
+        // ragged outline.
+        if i % 26 == 0 && (0.08..0.90).contains(&t) {
+            let side = if (i / 26) % 2 == 0 { 1 } else { -1 };
+            // Outward from the temple's axis, in whichever direction the body is
+            // furthest from the centre.
+            let (ax, az) = (px - cx as f32, pz - cz as f32);
+            let (nx, nz) = if ax.abs() > az.abs() {
+                (ax.signum() as i32, 0)
+            } else {
+                (0, az.signum() as i32)
+            };
+            let (x, y, z) = (px.round() as i32, py.round() as i32, pz.round() as i32);
+            // Anchored on the flank, never floating beside it: `reach` rounds
+            // up and can land outside the tube.
+            let flank = r.floor().max(1.0) as i32;
+            let (bx, bz) = (x + nx * flank, z + nz * flank);
+            put(world, bx, y + side.max(0), bz, RED_WOOL);
+            put(world, bx + nx, y + side, bz + nz, BLACK_CONCRETE);
+        }
+    }
+
+    // Two pairs of short clawed legs, hanging off the lower coils.
+    for t in [0.26_f32, 0.58] {
+        let (px, py, pz) = point(t);
+        let (ax, az) = (px - cx as f32, pz - cz as f32);
+        let (nx, nz) = if ax.abs() > az.abs() {
+            (ax.signum() as i32, 0)
+        } else {
+            (0, az.signum() as i32)
+        };
+        // The legs run along the body, one in front of the other.
+        let (tx, tz) = (-nz, nx);
+        let (x, y, z) = (px.round() as i32, py.round() as i32, pz.round() as i32);
+        for along in [-1i32, 2] {
+            let (lx, lz) = (x + tx * along + nx, z + tz * along + nz);
+            put(world, lx, y - 1, lz, RED_WOOL);
+            put(world, lx + nx, y - 2, lz + nz, RED_CONCRETE);
+            put(world, lx + nx * 2, y - 2, lz + nz * 2, BLACK_CONCRETE);
+        }
+    }
+
+    // The head, at the end of the spiral: it comes out over the temple's front
+    // (+z) at ridge height, so the default view meets it face on.
+    // The head, at the end of the spiral, held out over the temple's right-hand
+    // corner. It looks along -x, across the facade: a dragon's head is all
+    // profile, and nose-on it is just a cube with eyes.
+    let (nx, ny, nz) = {
+        let (px, py, pz) = point(1.0);
+        (px.round() as i32, py.round() as i32, pz.round() as i32)
+    };
+    // A short neck lifts the skull clear of the last coil: at this scale a head
+    // sitting straight on the body is just a lump on the tube.
+    let (hx, hy, hz) = (nx - 1, ny + 4, nz + 1);
+    for step in 0..=4 {
+        let x = nx - step / 2;
+        let z = nz + step / 3;
+        box_of(world, (x, ny + step, z), (x, ny + step + 1, z + 1), WHITE_WOOL);
+        carve(world, x, ny + step + 2, z, RED_WOOL);
+    }
+
+    // Skull, three wide and two tall, with the eyes on its cheeks.
+    box_of(world, (hx - 2, hy, hz - 1), (hx + 1, hy + 1, hz + 1), WHITE_WOOL);
+    // Brow ridge, continuing the crest that runs down the whole back.
+    box_of(world, (hx - 2, hy + 2, hz - 1), (hx + 1, hy + 2, hz + 1), RED_WOOL);
+    // Muzzle, dropping as it reaches forward, with a black nose.
+    box_of(world, (hx - 4, hy, hz - 1), (hx - 3, hy, hz + 1), WHITE_WOOL);
+    carve(world, hx - 5, hy, hz, BLACK_CONCRETE);
+    // Lower jaw, open: the gap between the two is the mouth.
+    box_of(world, (hx - 4, hy - 1, hz - 1), (hx - 1, hy - 1, hz + 1), RED_CONCRETE);
+    // Throat, glowing faintly through the open jaw.
+    box_of(world, (hx - 2, hy, hz), (hx - 1, hy, hz), NETHERRACK);
+    // Eyes: the only part of the dragon that survives after dark.
+    carve(world, hx - 1, hy + 1, hz - 1, GLOWSTONE);
+    carve(world, hx - 1, hy + 1, hz + 1, GLOWSTONE);
+    // Horns sweeping back off the skull, black at the tips, and the cheek
+    // frills the reference build hangs under the jaw.
+    for side in [-1i32, 1] {
+        for step in 0..3 {
+            let block = if step == 2 { BLACK_CONCRETE } else { RED_WOOL };
+            carve(world, hx + 1 + step, hy + 2 + step, hz + side, block);
+        }
+        carve(world, hx - 1, hy, hz + side * 2, RED_WOOL);
+        carve(world, hx - 2, hy - 1, hz + side * 2, BLACK_CONCRETE);
     }
 }
 
@@ -630,8 +751,9 @@ mod tests {
             assert!(count(w, GLASS) >= 3, "seed {seed}: no lit threshold");
             assert!(count(w, STONE_BRICKS) > 20, "seed {seed}: no bridge or ruin");
             assert!(count(w, OAK_LOG) > 40, "seed {seed}: no great tree");
-            // The dragon is the only obsidian in the scene, and it is big.
-            assert!(count(w, OBSIDIAN) > 60, "seed {seed}: no dragon");
+            // The dragon is the only wool in the scene, and it is big.
+            assert!(count(w, WHITE_WOOL) > 200, "seed {seed}: no dragon");
+            assert!(count(w, RED_WOOL) > 20, "seed {seed}: the dragon has no crest");
         }
     }
 
@@ -707,33 +829,37 @@ mod tests {
     }
 
     #[test]
-    fn the_dragon_perches_above_the_temple_roof() {
+    fn the_dragon_rears_its_head_above_the_temple_roof() {
         let island = built(2024);
-        let cx = TEMPLE.0 + TEMPLE_W / 2;
+        let hide = |b: Block| matches!(b, WHITE_WOOL | RED_WOOL | RED_CONCRETE | BLACK_CONCRETE);
 
-        // Find the temple roof under the dragon, then the gold above it.
+        // The roof, at the temple's centre line, and the highest block of the
+        // dragon anywhere around it.
+        let cx = TEMPLE.0 + TEMPLE_W / 2;
         let mut roof = 0;
-        let mut dragon_top = 0;
+        let mut head = 0;
         for y in 0..island.world.size[1] as i32 {
-            for z in TEMPLE.1..TEMPLE.1 + TEMPLE_D {
-                match island.world.get(cx, y, z) {
-                    QUARTZ | QUARTZ_BRICKS => roof = roof.max(y),
-                    OBSIDIAN | EMERALD_BLOCK => dragon_top = dragon_top.max(y),
-                    _ => {}
+            for z in TEMPLE.1 - 8..TEMPLE.1 + TEMPLE_D + 8 {
+                if matches!(island.world.get(cx, y, z), QUARTZ | QUARTZ_BRICKS) {
+                    roof = roof.max(y);
+                }
+                for x in TEMPLE.0 - 8..TEMPLE.0 + TEMPLE_W + 8 {
+                    if hide(island.world.get(x, y, z)) {
+                        head = head.max(y);
+                    }
                 }
             }
         }
         assert!(
-            dragon_top > roof,
-            "the dragon ({dragon_top}) should sit above the roof ({roof})"
+            head > roof + 2,
+            "the dragon ({head}) should rear over the roof ({roof})"
         );
 
-        // It has lit eyes, somewhere above the roof: the head sits out over the
-        // entrance, so the search covers the whole temple footprint.
+        // Its eyes are lit, and they are up there with the head.
         let mut eyes = Vec::new();
         for y in roof..island.world.size[1] as i32 {
-            for z in TEMPLE.1 - 2..TEMPLE.1 + TEMPLE_D + 2 {
-                for x in TEMPLE.0 - 6..=TEMPLE.0 + TEMPLE_W + 2 {
+            for z in TEMPLE.1 - 8..TEMPLE.1 + TEMPLE_D + 8 {
+                for x in TEMPLE.0 - 8..TEMPLE.0 + TEMPLE_W + 8 {
                     if island.world.get(x, y, z) == GLOWSTONE {
                         eyes.push((x, y, z));
                     }
@@ -741,6 +867,61 @@ mod tests {
             }
         }
         assert!(eyes.len() >= 2, "the dragon has no eyes: {eyes:?}");
+    }
+
+    #[test]
+    fn the_dragon_wraps_around_all_four_sides_of_the_temple() {
+        let island = built(2024);
+        let (x0, z0) = TEMPLE;
+        let (x1, z1) = (x0 + TEMPLE_W - 1, z0 + TEMPLE_D - 1);
+        let hide = |b: Block| matches!(b, WHITE_WOOL | RED_WOOL | RED_CONCRETE | BLACK_CONCRETE);
+
+        let mut sides = [0usize; 4];
+        for y in 0..island.world.size[1] as i32 {
+            for z in 0..island.world.size[2] as i32 {
+                for x in 0..island.world.size[0] as i32 {
+                    if !hide(island.world.get(x, y, z)) {
+                        continue;
+                    }
+                    // Only count what is genuinely beside the building, not the
+                    // head hanging over its roof.
+                    match (x < x0, x > x1, z < z0, z > z1) {
+                        (true, _, false, false) => sides[0] += 1,
+                        (_, true, false, false) => sides[1] += 1,
+                        (false, false, true, _) => sides[2] += 1,
+                        (false, false, _, true) => sides[3] += 1,
+                        _ => {}
+                    }
+                }
+            }
+        }
+        for (i, n) in sides.iter().enumerate() {
+            assert!(*n > 25, "side {i} of the temple has no dragon on it ({n})");
+        }
+    }
+
+    #[test]
+    fn the_dragon_never_eats_the_temple() {
+        // The coil writes only into air, so the colonnade must survive it whole.
+        let columns = |island: &Island| {
+            let mut n = 0;
+            for y in 0..island.world.size[1] as i32 {
+                for z in TEMPLE.1..TEMPLE.1 + TEMPLE_D {
+                    for x in TEMPLE.0..TEMPLE.0 + TEMPLE_W {
+                        if island.world.get(x, y, z) == QUARTZ_PILLAR {
+                            n += 1;
+                        }
+                    }
+                }
+            }
+            n
+        };
+
+        let mut bare = terrain::generate(2024);
+        let base = level(&mut bare, TEMPLE.0, TEMPLE.1, TEMPLE_W, TEMPLE_D, 1);
+        temple(&mut bare, TEMPLE.0, TEMPLE.1, base);
+
+        assert_eq!(columns(&bare), columns(&built(2024)));
     }
 
     #[test]
@@ -770,3 +951,4 @@ mod tests {
         }
     }
 }
+
