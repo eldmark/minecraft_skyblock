@@ -192,9 +192,9 @@ impl Args {
 const USAGE: &str = "\
 usage: skyblock [--window | --render DIR | --bench N] [--frames N] [--width W] [--height H]
 
-  --window         live window (default): drag to look, scroll or W/S to zoom,
-                   F toggles free flight (WASD, Space/Shift, Ctrl sprints),
-                   D runs the day/night cycle, R reseeds, P screenshots, Esc quits
+  --window         live window (default): arrows or drag to turn, WASD to move,
+                   F toggles free flight (Q/E up-down, Shift sprints),
+                   Space runs the day/night cycle, R reseeds, P screenshots, Esc quits
   --render DIR     write an orbit as PNG frames, no window
   --bench N        render N frames and report ms/frame
   --bench-idle N   time N refinement frames with a still camera
@@ -388,12 +388,17 @@ fn run_window(args: &Args) -> io::Result<()> {
                 "camera: {}",
                 match next {
                     CameraMode::Orbit => "orbiting the island",
-                    CameraMode::Free => "free flight (WASD, Space/Shift, Ctrl to sprint)",
+                    CameraMode::Free => "free flight (WASD, Q/E up-down, Shift to sprint)",
                 }
             );
         }
         match camera.mode {
-            CameraMode::Orbit => camera.apply(input.orbit, input.zoom),
+            // While orbiting, A and D swing the camera around the island the way
+            // the arrows do, and W and S dolly in and out.
+            CameraMode::Orbit => camera.apply(
+                (input.orbit.0 + input.move_axes.1 * 6.0, input.orbit.1),
+                input.zoom,
+            ),
             CameraMode::Free => {
                 camera.look(input.orbit);
                 camera.fly(input.move_axes, last_frame_seconds, input.boost);

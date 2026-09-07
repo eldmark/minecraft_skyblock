@@ -261,11 +261,12 @@ fn dragon(island: &mut Island, cx: i32, cz: i32, base: i32, ridge: i32) {
     }
 
     let tau = std::f32::consts::TAU;
-    // The spiral ends on the right-hand corner of the temple rather than dead
-    // centre: the head then looks *across* the facade, and the default camera
-    // sees it in profile instead of nose-on and foreshortened.
+    // The spiral ends on the front-right corner of the temple, and the head
+    // looks out over the entrance (+z) from there — the direction the temple
+    // itself faces, and a three-quarter view from the default camera rather
+    // than a flat profile or a foreshortened muzzle.
     let turns = 1.5;
-    let head_angle = 0.22 * tau;
+    let head_angle = 0.12 * tau;
     let y_tail = (base + 2) as f32;
     let y_head = (ridge + 5) as f32;
 
@@ -385,48 +386,47 @@ fn dragon(island: &mut Island, cx: i32, cz: i32, base: i32, ridge: i32) {
         }
     }
 
-    // The head, at the end of the spiral: it comes out over the temple's front
-    // (+z) at ridge height, so the default view meets it face on.
-    // The head, at the end of the spiral, held out over the temple's right-hand
-    // corner. It looks along -x, across the facade: a dragon's head is all
-    // profile, and nose-on it is just a cube with eyes.
+    // The head, at the end of the spiral, held out over the temple's front-right
+    // corner and facing the way the building does, along +z.
     let (nx, ny, nz) = {
         let (px, py, pz) = point(1.0);
         (px.round() as i32, py.round() as i32, pz.round() as i32)
     };
     // A short neck lifts the skull clear of the last coil: at this scale a head
     // sitting straight on the body is just a lump on the tube.
-    let (hx, hy, hz) = (nx - 1, ny + 4, nz + 1);
+    let (hx, hy, hz) = (nx, ny + 4, nz + 1);
     for step in 0..=4 {
-        let x = nx - step / 2;
-        let z = nz + step / 3;
-        box_of(world, (x, ny + step, z), (x, ny + step + 1, z + 1), WHITE_WOOL);
+        let x = nx - step / 3;
+        let z = nz + step / 2;
+        box_of(world, (x, ny + step, z), (x + 1, ny + step + 1, z), WHITE_WOOL);
         carve(world, x, ny + step + 2, z, RED_WOOL);
     }
 
-    // Skull, three wide and two tall, with the eyes on its cheeks.
-    box_of(world, (hx - 2, hy, hz - 1), (hx + 1, hy + 1, hz + 1), WHITE_WOOL);
+    // Skull, three wide, with the eyes on its cheeks.
+    box_of(world, (hx - 1, hy, hz - 1), (hx + 1, hy + 1, hz + 2), WHITE_WOOL);
     // Brow ridge, continuing the crest that runs down the whole back.
-    box_of(world, (hx - 2, hy + 2, hz - 1), (hx + 1, hy + 2, hz + 1), RED_WOOL);
+    box_of(world, (hx - 1, hy + 2, hz - 1), (hx + 1, hy + 2, hz + 2), RED_WOOL);
     // Muzzle, dropping as it reaches forward, with a black nose.
-    box_of(world, (hx - 4, hy, hz - 1), (hx - 3, hy, hz + 1), WHITE_WOOL);
-    carve(world, hx - 5, hy, hz, BLACK_CONCRETE);
+    box_of(world, (hx - 1, hy, hz + 3), (hx + 1, hy, hz + 4), WHITE_WOOL);
+    carve(world, hx, hy, hz + 5, BLACK_CONCRETE);
     // Lower jaw, open: the gap between the two is the mouth.
-    box_of(world, (hx - 4, hy - 1, hz - 1), (hx - 1, hy - 1, hz + 1), RED_CONCRETE);
+    box_of(world, (hx - 1, hy - 1, hz + 1), (hx + 1, hy - 1, hz + 4), RED_CONCRETE);
     // Throat, glowing faintly through the open jaw.
-    box_of(world, (hx - 2, hy, hz), (hx - 1, hy, hz), NETHERRACK);
+    box_of(world, (hx, hy, hz + 1), (hx, hy, hz + 2), NETHERRACK);
     // Eyes: the only part of the dragon that survives after dark.
-    carve(world, hx - 1, hy + 1, hz - 1, GLOWSTONE);
-    carve(world, hx - 1, hy + 1, hz + 1, GLOWSTONE);
+    // On the front corners of the skull, where a three-quarter view still
+    // catches them: on the flat cheeks they were only visible from the side.
+    carve(world, hx - 1, hy + 1, hz + 2, GLOWSTONE);
+    carve(world, hx + 1, hy + 1, hz + 2, GLOWSTONE);
     // Horns sweeping back off the skull, black at the tips, and the cheek
     // frills the reference build hangs under the jaw.
     for side in [-1i32, 1] {
         for step in 0..3 {
             let block = if step == 2 { BLACK_CONCRETE } else { RED_WOOL };
-            carve(world, hx + 1 + step, hy + 2 + step, hz + side, block);
+            carve(world, hx + side, hy + 2 + step, hz - 1 - step, block);
         }
-        carve(world, hx - 1, hy, hz + side * 2, RED_WOOL);
-        carve(world, hx - 2, hy - 1, hz + side * 2, BLACK_CONCRETE);
+        carve(world, hx + side * 2, hy, hz + 1, RED_WOOL);
+        carve(world, hx + side * 2, hy - 1, hz + 2, BLACK_CONCRETE);
     }
 }
 
