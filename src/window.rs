@@ -15,16 +15,17 @@ pub struct Input {
     pub reseed: bool,
     pub screenshot: bool,
     pub quality: Option<usize>,
-    /// Space starts and stops the day/night cycle.
+    /// `E` starts and stops the day/night cycle.
     pub toggle_cycle: bool,
     /// `,` and `.` nudge the clock by hand, in fractions of a day.
     pub time_nudge: f32,
     /// `F` swaps between orbiting the island and flying freely.
     pub toggle_free: bool,
     /// Movement intent: (forward, right, up), each in `[-1, 1]`. W/A/S/D drive
-    /// forward and right in both camera modes; Q/E drive up while flying.
+    /// forward and right in both camera modes; Space and Shift drive up and down
+    /// while flying.
     pub move_axes: (f32, f32, f32),
-    /// Shift (or Ctrl): move faster.
+    /// Ctrl: move faster.
     pub boost: bool,
     /// `1`-`9` pick a slot on the hotbar.
     pub select_slot: Option<usize>,
@@ -82,7 +83,7 @@ impl WindowOutput {
     }
 
     /// Collect this frame's camera intent. Arrows and the mouse turn the camera,
-    /// W/A/S/D move it, Space runs the day/night cycle.
+    /// W/A/S/D move it, Space and Shift fly up and down, E runs the cycle.
     pub fn poll_input(&mut self) -> Input {
         let mut input = Input::default();
 
@@ -128,14 +129,13 @@ impl WindowOutput {
         input.move_axes = (
             forward,
             axis(&self.window, Key::D, Key::A),
-            axis(&self.window, Key::E, Key::Q),
+            axis(&self.window, Key::Space, Key::LeftShift),
         );
-        input.boost =
-            self.window.is_key_down(Key::LeftShift) || self.window.is_key_down(Key::LeftCtrl);
+        input.boost = self.window.is_key_down(Key::LeftCtrl);
         input.toggle_free = self.window.is_key_pressed(Key::F, minifb::KeyRepeat::No);
 
         input.reseed = self.window.is_key_pressed(Key::R, minifb::KeyRepeat::No);
-        input.toggle_cycle = self.window.is_key_pressed(Key::Space, minifb::KeyRepeat::No);
+        input.toggle_cycle = self.window.is_key_pressed(Key::E, minifb::KeyRepeat::No);
         if self.window.is_key_down(Key::Comma) {
             input.time_nudge -= 0.004;
         }

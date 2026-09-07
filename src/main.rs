@@ -199,8 +199,8 @@ const USAGE: &str = "\
 usage: skyblock [--window | --render DIR | --bench N] [--frames N] [--width W] [--height H]
 
   --window         live window (default): arrows or drag to turn, WASD to move,
-                   F toggles free flight (Q/E up-down, Shift sprints),
-                   Space runs the day/night cycle, R reseeds, P screenshots, Esc quits
+                   F toggles free flight (Space/Shift up-down, Ctrl sprints),
+                   E runs the day/night cycle, R reseeds, P screenshots, Esc quits
   --render DIR     write an orbit as PNG frames, no window
   --bench N        render N frames and report ms/frame
   --bench-idle N   time N refinement frames with a still camera
@@ -449,7 +449,7 @@ fn run_window(args: &Args) -> io::Result<()> {
                 "camera: {}",
                 match next {
                     CameraMode::Orbit => "orbiting the island",
-                    CameraMode::Free => "free flight (WASD, Q/E up-down, Shift to sprint)",
+                    CameraMode::Free => "free flight (WASD, Space/Shift up-down, Ctrl to sprint)",
                 }
             );
         }
@@ -559,9 +559,9 @@ fn run_window(args: &Args) -> io::Result<()> {
             },
             scene.clock(),
             if scene.cycle_running {
-                "(space: running)"
+                "(E: running)"
             } else {
-                "(space: paused)"
+                "(E: paused)"
             },
             hud.label()
         ));

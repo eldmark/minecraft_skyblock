@@ -60,12 +60,12 @@ que es como se arma el video del ciclo.
 | Arrastrar mouse | Girar la cámara arrastrando la escena |
 | `W` / `S` | Acercar-alejar (órbita) · avanzar-retroceder (vuelo) |
 | `A` / `D` | Girar alrededor de la isla (órbita) · desplazarse a los lados (vuelo) |
-| `Q` / `E` | Bajar / subir (vuelo) |
-| `Shift` | Moverse más rápido |
+| `Espacio` / `Shift` | Subir / bajar (vuelo) |
+| `Ctrl` | Moverse más rápido |
 | Scroll | Acercar / alejar |
 | `1`–`7` | Elegir ranura de la hotbar |
 | `Enter` | Usar el objeto elegido (mantener, en el reloj y la brújula) |
-| `Espacio` | Arrancar / detener el **ciclo de día y noche** |
+| `E` | Arrancar / detener el **ciclo de día y noche** |
 | `F` | Alternar entre **órbita** y **vuelo libre** |
 | `H` | Mostrar u ocultar la hotbar |
 | `,` / `.` | Mover la hora a mano |
@@ -121,7 +121,7 @@ El programa lee las texturas directamente del ZIP con su propio DEFLATE.
 | Mapas normales | `texture.rs` — derivados por Sobel de la luminancia de cada textura |
 | Material emisivo | glowstone y la puerta, como luces puntuales reales |
 | Skybox | `skybox.rs` — cielo procedural que sigue la hora (por defecto) o cubemap del panorama |
-| Ciclo día/noche | `daylight.rs` — sol, luna, paleta del cielo y ambiente desde un solo número; tecla `Espacio` |
+| Ciclo día/noche | `daylight.rs` — sol, luna, paleta del cielo y ambiente desde un solo número; tecla `E` |
 | Paralelismo y optimización | `parallel.rs`, tabla de mediciones abajo |
 
 ## La escena
