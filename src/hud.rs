@@ -552,7 +552,7 @@ fn first_frame(image: Image) -> Image {
 
 /// Nearest-neighbour blit with alpha, straight into the 0RGB buffer. `tint`
 /// scales the colour (not the alpha), which is all the drop shadow needs.
-fn blit(frame: &mut Framebuffer, src: &Image, x: i32, y: i32, w: i32, h: i32, tint: f32) {
+pub(crate) fn blit(frame: &mut Framebuffer, src: &Image, x: i32, y: i32, w: i32, h: i32, tint: f32) {
     blit_rect(frame, src, (0, 0, src.width, src.height), x, y, w, h, tint);
 }
 
@@ -595,7 +595,7 @@ fn blit_rect(
 }
 
 /// A flat rectangle, blended in. Used for the inventory panel and its cells.
-fn fill_rect(frame: &mut Framebuffer, x: i32, y: i32, w: i32, h: i32, color: u32, alpha: u32) {
+pub(crate) fn fill_rect(frame: &mut Framebuffer, x: i32, y: i32, w: i32, h: i32, color: u32, alpha: u32) {
     let (fw, fh) = (frame.width as i32, frame.height as i32);
     let src = [(color >> 16) as u8, (color >> 8) as u8, color as u8];
     for dy in y.max(0)..(y + h).min(fh) {
@@ -607,7 +607,7 @@ fn fill_rect(frame: &mut Framebuffer, x: i32, y: i32, w: i32, h: i32, color: u32
 }
 
 /// Darken the whole frame, so an overlay on top of it reads as a screen.
-fn dim(frame: &mut Framebuffer, amount: f32) {
+pub(crate) fn dim(frame: &mut Framebuffer, amount: f32) {
     let keep = ((1.0 - amount) * 256.0) as u32;
     for p in frame.pixels.iter_mut() {
         let r = ((*p >> 16) & 0xff) * keep >> 8;
@@ -638,7 +638,7 @@ pub struct Font {
 }
 
 impl Font {
-    fn load(pack: &Pack) -> Result<Font, String> {
+    pub(crate) fn load(pack: &Pack) -> Result<Font, String> {
         let sheet = pack.decode_png(FONT)?;
         let cell = sheet.width / 16;
         let mut widths = [0u8; 256];

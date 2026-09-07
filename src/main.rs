@@ -22,6 +22,7 @@ mod png;
 mod render;
 mod scene;
 mod skybox;
+mod splash;
 mod structures;
 mod terrain;
 mod texture;
@@ -392,24 +393,69 @@ tracing {:.0}% of the pixels",
     Ok(())
 }
 
+/// The title screen. Returns false when the player closed the window instead of
+/// pressing Jugar. The scene is not built until this returns.
+fn run_splash(
+    win: &mut WindowOutput,
+    frame: &mut Framebuffer,
+    splash: &mut splash::Splash,
+) -> io::Result<bool> {
+    while win.is_open() {
+        let input = win.poll_input();
+        let (w, h) = win.size();
+        frame.resize(w, h);
+
+        if input.escape && splash.escape() == Some(splash::Choice::Quit) {
+            return Ok(false);
+        }
+        if input.click_left {
+            if let Some((mx, my)) = input.mouse {
+                if splash.click(frame, mx, my) == Some(splash::Choice::Play) {
+                    return Ok(true);
+                }
+            }
+        }
+
+        splash.draw(frame);
+        if !win.present(frame)? {
+            return Ok(false);
+        }
+    }
+    Ok(false)
+}
+
 fn run_window(args: &Args) -> io::Result<()> {
+    let pack = pack::Pack::open(None).map_err(io::Error::other)?;
+    let mut win = WindowOutput::new("Skyblock Diorama", args.width, args.height)?;
+    let mut frame = Framebuffer::new(args.width, args.height);
+
+    // Title screen first, with the window already up: the scene takes a moment
+    // to build and there is no reason to stare at a black rectangle for it.
+    let mut splash = splash::Splash::load(&pack).map_err(io::Error::other)?;
+    if !run_splash(&mut win, &mut frame, &mut splash)? {
+        return Ok(());
+    }
+    win.set_status("cargando la escena...");
+    win.present(&frame)?;
+
     let mut scene = load_scene(args.seed, args.panorama_sky, args.time)?;
     // The overlay reads its own sprites out of the same pack the scene uses.
-    let mut hud = hud::Hud::load(&pack::Pack::open(None).map_err(io::Error::other)?)
-        .map_err(io::Error::other)?;
+    let mut hud = hud::Hud::load(&pack).map_err(io::Error::other)?;
     let mut hud_visible = true;
     // The overlay is composited into a copy: the renderer keeps re-using the
     // frame it wrote, and painting a hotbar into it would poison the running
     // average and the pixels the refinement pass skips.
     let mut presented = Framebuffer::new(args.width, args.height);
     let mut camera = scene_camera(scene.world());
-    let mut win = WindowOutput::new("Skyblock Diorama", args.width, args.height)?;
-    let mut frame = Framebuffer::new(args.width, args.height);
+    // Mouselook from the first frame, as in the game.
+    win.set_mouselook(true);
     let mut renderer = Renderer::new();
     if let Some(threads) = args.threads {
         renderer.threads = threads;
     }
     let mut shots = 0usize;
+    // Whether mouselook was on before the inventory borrowed the pointer.
+    let mut mouselook_after_inventory = false;
     let mut quality = 1usize;
     let mut last_frame_seconds = 1.0 / 60.0;
 
@@ -431,6 +477,18 @@ fn run_window(args: &Args) -> io::Result<()> {
         if input.toggle_inventory {
             hud.toggle_inventory();
         }
+        // Escape backs out of one thing at a time: the inventory, then the
+        // mouselook, and only then the program. Closing the window works too.
+        if input.escape {
+            if hud.open {
+                hud.toggle_inventory();
+            } else if win.mouselook() {
+                win.set_mouselook(false);
+                hud.say("Esc otra vez para salir, Tab para volver al mouse");
+            } else {
+                break;
+            }
+        }
         // Mouselook is the free-flight default, the way it is in the game: F
         // turns it on with the flight, Tab switches it by hand, and the
         // inventory hands the pointer back so its cells can be clicked.
@@ -439,8 +497,15 @@ fn run_window(args: &Args) -> io::Result<()> {
             win.set_mouselook(on);
             println!("mouselook {}", if on { "on" } else { "off" });
         }
+        // The inventory borrows the pointer and gives it back on the way out,
+        // instead of leaving mouselook off for good.
         if hud.open && win.mouselook() {
             win.set_mouselook(false);
+            mouselook_after_inventory = true;
+        }
+        if !hud.open && mouselook_after_inventory {
+            win.set_mouselook(true);
+            mouselook_after_inventory = false;
         }
 
         // Mouse over the world: left click breaks the block under the pointer,
@@ -511,7 +576,9 @@ fn run_window(args: &Args) -> io::Result<()> {
                 CameraMode::Free => CameraMode::Orbit,
             };
             camera.set_mode(next);
-            win.set_mouselook(next == CameraMode::Free && !hud.open);
+            if next == CameraMode::Free && !hud.open {
+                win.set_mouselook(true);
+            }
             println!(
                 "camera: {}",
                 match next {

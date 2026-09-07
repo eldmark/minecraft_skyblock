@@ -32,6 +32,13 @@ Escrito a mano, sin crates: matemática vectorial, decodificador y codificador P
 (incluye DEFLATE completo), lector del ZIP del texture pack, ruido Perlin/fBm,
 recorrido DDA de vóxeles, mapas normales, skybox, y el planificador multihilo.
 
+## Pantalla de inicio
+
+Al abrir la ventana aparece una pantalla de título —fondo, créditos y dos botones,
+**Jugar** y **Reglas**— dibujada con la misma tipografía del pack y el mismo
+compositor a mano que la interfaz del juego. La escena no se construye hasta que se
+presiona Jugar.
+
 ## Uso
 
 ```bash
@@ -41,7 +48,7 @@ cargo run --release -- --bench 30                # medición de ms/frame
 cargo run --release -- --bench-idle 60           # medición del frame en reposo
 cargo run --release -- --bench-move 60           # medición del frame mientras se arrastra
 cargo run --release -- --check-pack              # verifica la carga del texture pack
-cargo test --release                             # 136 pruebas
+cargo test --release                             # 140 pruebas
 ```
 
 Opciones: `--width W --height H --seed N --threads N --samples N --sky-panorama
@@ -58,8 +65,8 @@ que es como se arma el video del ciclo.
 
 | Tecla / acción | Efecto |
 |---|---|
-| Mover el mouse | Girar la cámara, con **mouselook** activo (como en el juego) |
-| `Tab` | Activar / desactivar mouselook (se activa solo al entrar en vuelo con `F`) |
+| Mover el mouse | Girar la cámara: el **mouselook** está activo desde el primer frame |
+| `Tab` | Soltar o retomar el mouselook |
 | Arrastrar mouse | Girar la cámara arrastrando la escena, con mouselook apagado |
 | Flechas | Girar la cámara (arriba mira hacia arriba) |
 | `W` / `S` | Acercar-alejar (órbita) · avanzar-retroceder (vuelo) |
@@ -79,7 +86,7 @@ que es como se arma el video del ciclo.
 | `R` | Regenerar el terreno con otra semilla |
 | `F1`–`F4` | Escala de resolución directa (el telescopio la cicla) |
 | `P` | Captura de pantalla a PNG |
-| `Esc` | Salir |
+| `Esc` | Cierra el inventario; luego suelta el mouse; luego sale |
 
 La hotbar es el menú, y cada objeto es su acción:
 
@@ -206,6 +213,7 @@ src/
   main.rs        modos: ventana, render offline, benchmark, verificación del pack
   output.rs      trait Output: ventana o PNGs; el renderer no sabe cuál
   window.rs      único módulo que toca minifb
+  splash.rs      pantalla de título: fondo, créditos, botones y reglas
   hud.rs         hotbar, iconos y tipografía del pack, compuestos sobre el frame
   math.rs        Vec3, reflect, refract (Snell + TIR), Fresnel, gamma
   inflate.rs     DEFLATE (stored, Huffman fijo y dinámico) + zlib

@@ -39,6 +39,8 @@ pub struct Input {
     pub toggle_inventory: bool,
     /// Tab turns mouselook on and off.
     pub toggle_mouselook: bool,
+    /// Escape: backs out of one thing at a time rather than killing the window.
+    pub escape: bool,
     /// Whether the camera is currently following the mouse without a button.
     pub mouselook: bool,
     /// The pixel a click aims at: the crosshair under mouselook, the cursor
@@ -118,8 +120,12 @@ impl WindowOutput {
         self.mouselook
     }
 
+    /// Only the window manager closes the window now. Escape is reported as
+    /// input instead: under mouselook the pointer is hidden and captured by the
+    /// look, and a single key that both releases it and quits is a key that
+    /// quits by accident.
     pub fn is_open(&self) -> bool {
-        self.window.is_open() && !self.window.is_key_down(Key::Escape)
+        self.window.is_open()
     }
 
     /// Collect this frame's camera intent. Arrows and the mouse turn the camera,
@@ -130,7 +136,14 @@ impl WindowOutput {
         let mut input = Input::default();
 
         let dragging = self.window.get_mouse_down(MouseButton::Left);
-        let mouse = self.window.get_mouse_pos(MouseMode::Pass);
+        // Clamped while looking: the pointer can leave the window and the
+        // position keeps reading as the border, which is what lets the edge push
+        // carry on turning instead of the look dying mid-swing.
+        let mouse = self.window.get_mouse_pos(if self.mouselook {
+            MouseMode::Clamp
+        } else {
+            MouseMode::Pass
+        });
         let (win_w, win_h) = self.window.get_size();
         input.mouse = mouse;
         input.mouselook = self.mouselook;
@@ -233,6 +246,7 @@ impl WindowOutput {
         input.toggle_cycle = self.window.is_key_pressed(Key::Q, minifb::KeyRepeat::No);
         input.toggle_inventory = self.window.is_key_pressed(Key::E, minifb::KeyRepeat::No);
         input.toggle_mouselook = self.window.is_key_pressed(Key::Tab, minifb::KeyRepeat::No);
+        input.escape = self.window.is_key_pressed(Key::Escape, minifb::KeyRepeat::No);
         if self.window.is_key_down(Key::Comma) {
             input.time_nudge -= 0.004;
         }
