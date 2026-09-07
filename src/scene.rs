@@ -9,6 +9,7 @@ use crate::blocks::{self, Block};
 use crate::noise::Noise;
 use crate::parallel::thread_count;
 use crate::skybox::Skybox;
+use crate::neighbours;
 use crate::structures;
 use crate::terrain::{self, Island};
 use crate::world::World;
@@ -18,7 +19,12 @@ use crate::world::World;
 const SKY_STEPS: f32 = 96.0;
 
 pub struct Scene {
+    /// The main island, in its own coordinates: generation and every structure
+    /// still work in that box.
     pub island: Island,
+    /// The whole diorama — the main island stamped into a wider world, plus its
+    /// two neighbours and the bridges. This is what the renderer traces.
+    world: World,
     pub assets: Assets,
     pub skybox: Skybox,
     /// Position in the day/night cycle: 0 sunrise, 0.25 noon, 0.5 sunset,
@@ -52,10 +58,12 @@ impl Scene {
         let threads = thread_count();
         let mut island = terrain::generate(seed);
         structures::place_all(&mut island);
-        let lights = structures::collect_lights(&island.world);
+        let world = neighbours::compose(&island, seed);
+        let lights = structures::collect_lights(&world);
         let light = daylight::at(time);
         Ok(Scene {
             island,
+            world,
             assets: Assets::load(pack)?,
             skybox: if panorama_sky {
                 Skybox::panorama(pack, time, threads)
@@ -120,13 +128,14 @@ impl Scene {
     }
 
     pub fn world(&self) -> &World {
-        &self.island.world
+        &self.world
     }
 
     pub fn reseed(&mut self, seed: u32) {
         let mut island = terrain::generate(seed);
         structures::place_all(&mut island);
-        self.lights = structures::collect_lights(&island.world);
+        self.world = neighbours::compose(&island, seed);
+        self.lights = structures::collect_lights(&self.world);
         self.island = island;
     }
 
@@ -154,7 +163,7 @@ impl Scene {
     }
 
     pub fn is_portal(&self, block: Block) -> bool {
-        block == blocks::PORTAL
+        matches!(block, blocks::PORTAL | blocks::NETHER_PORTAL)
     }
 
     /// Frame index for an animated texture with `frames` frames. Minecraft's water

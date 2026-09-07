@@ -41,12 +41,35 @@ pub const RED_WOOL: Block = 34;
 pub const RED_CONCRETE: Block = 35;
 pub const NETHERRACK: Block = 36;
 pub const BLACK_CONCRETE: Block = 37;
+pub const OAK_SLAB: Block = 38;
+pub const OAK_FENCE: Block = 39;
+pub const NETHER_BRICKS: Block = 40;
+pub const SOUL_SAND: Block = 41;
+pub const MAGMA: Block = 42;
+pub const LAVA: Block = 43;
+pub const NETHER_PORTAL: Block = 44;
+pub const HAY_BLOCK: Block = 45;
+pub const FARMLAND: Block = 46;
+pub const WHEAT: Block = 47;
+pub const BROWN_WOOL: Block = 48;
 
-pub const COUNT: usize = 38;
+pub const COUNT: usize = 49;
 
 /// Blocks that emit light of their own.
 pub fn is_emissive(block: Block) -> bool {
-    matches!(block, GLOWSTONE | PORTAL)
+    matches!(block, GLOWSTONE | PORTAL | LAVA | MAGMA | NETHER_PORTAL)
+}
+
+/// How much of its cell a block fills. Everything is a full cube unless it is
+/// one of the few shapes the bridge and the farm need.
+pub fn shape(block: Block) -> crate::world::Shape {
+    use crate::world::Shape;
+    match block {
+        OAK_SLAB => Shape::Slab,
+        OAK_FENCE => Shape::Fence,
+        WHEAT => Shape::Crop,
+        _ => Shape::Full,
+    }
 }
 
 /// Used in test failures and error messages.
@@ -91,6 +114,17 @@ pub fn name(block: Block) -> &'static str {
         RED_CONCRETE => "red_concrete",
         NETHERRACK => "netherrack",
         BLACK_CONCRETE => "black_concrete",
+        OAK_SLAB => "oak_slab",
+        OAK_FENCE => "oak_fence",
+        NETHER_BRICKS => "nether_bricks",
+        SOUL_SAND => "soul_sand",
+        MAGMA => "magma",
+        LAVA => "lava",
+        NETHER_PORTAL => "nether_portal",
+        HAY_BLOCK => "hay_block",
+        FARMLAND => "farmland",
+        WHEAT => "wheat",
+        BROWN_WOOL => "brown_wool",
         _ => "unknown",
     }
 }

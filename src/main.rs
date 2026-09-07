@@ -11,6 +11,7 @@ mod camera;
 mod daylight;
 mod hud;
 mod inflate;
+mod neighbours;
 mod noise;
 mod material;
 mod math;
@@ -245,7 +246,8 @@ fn scene_camera(world: &World) -> Camera {
         terrain::SURFACE_LEVEL + 4.0,
         world.size[2] as f32 * 0.5,
     );
-    Camera::new(center, world.size[0] as f32 * 1.9)
+    // Far enough back to hold the three islands and both bridges.
+    Camera::new(center, world.size[0] as f32 * 1.0)
 }
 
 fn run_headless(mut out: Box<dyn Output>, args: &Args, report: bool) -> io::Result<()> {

@@ -11,9 +11,19 @@ use crate::blocks::*;
 use crate::noise::Noise;
 use crate::world::World;
 
-/// Island footprint in blocks. The rubric asks for at least 16x16.
+/// Main island footprint in blocks. The rubric asks for at least 16x16.
+///
+/// The island is generated in its own 48x48 box, in its own coordinates, and is
+/// stamped into a wider world afterwards (see `neighbours::compose`). Keeping the
+/// generation and every hand-placed structure in island space is what let the
+/// diorama grow two more islands without touching a line of either.
 pub const SIZE: usize = 48;
 pub const HEIGHT: usize = 60;
+
+/// The shared world the islands are stamped into, and where the main one goes.
+pub const WORLD_X: usize = 128;
+pub const WORLD_Z: usize = 64;
+pub const ORIGIN: (i32, i32) = (40, 8);
 
 /// Ground level around which the surface undulates.
 pub const SURFACE_LEVEL: f32 = 32.0;

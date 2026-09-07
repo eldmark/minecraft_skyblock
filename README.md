@@ -1,11 +1,16 @@
 # Skyblock Diorama — CPU Raytracer
 
-Diorama de isla flotante estilo Minecraft, renderizado con un raytracer escrito desde
-cero en Rust. **Todo el cómputo corre en CPU**: sin OpenGL, sin shaders, sin GPU.
+Diorama de tres islas flotantes estilo Minecraft, renderizado con un raytracer escrito
+desde cero en Rust. **Todo el cómputo corre en CPU**: sin OpenGL, sin shaders, sin GPU.
 
 ![Vista general](screenshots/overview.png)
 ![La puerta de cristal](screenshots/gate.png)
 ![La cabeza del dragón](screenshots/dragon.png)
+
+Las dos islas vecinas, unidas a la principal por puentes de madera con barandas:
+
+![La isla del Nether](screenshots/nether.png)
+![La granja](screenshots/farm.png)
 
 La hotbar de Minecraft hace de menú: se elige la ranura con los números y se usa
 con `Enter`.
@@ -34,7 +39,7 @@ cargo run --release -- --bench 30                # medición de ms/frame
 cargo run --release -- --bench-idle 60           # medición del frame en reposo
 cargo run --release -- --bench-move 60           # medición del frame mientras se arrastra
 cargo run --release -- --check-pack              # verifica la carga del texture pack
-cargo test --release                             # 122 pruebas
+cargo test --release                             # 129 pruebas
 ```
 
 Opciones: `--width W --height H --seed N --threads N --samples N --sky-panorama
@@ -103,7 +108,9 @@ El programa lee las texturas directamente del ZIP con su propio DEFLATE.
 | Elemento | Dónde |
 |---|---|
 | Terreno procedural 48×48 (supera el mínimo de 16×16) | `terrain.rs` — Perlin/fBm propio, isla con estalactita, montículo rocoso, río con dos cascadas, vetas de mineral, árboles |
+| Dos islas vecinas y sus puentes | `neighbours.rs` — mismo ruido a menor escala, isla del Nether e isla granja |
 | Complejidad de escena | `structures.rs` — templo, dragón enrollado, gran árbol, puente, ruina |
+| Bloques parciales (slabs, cercas, cultivos) | `world.rs` — cajas dentro del vóxel resueltas dentro del propio DDA |
 | Rotación y zoom de cámara | `camera.rs` — órbita con pitch acotado y zoom multiplicativo, más vuelo libre con `F` |
 | 5 materiales con textura y parámetros propios | `assets.rs` — terreno, agua, metal, emisivo, cristal |
 | Refracción | `render.rs` — Snell con reflexión interna total; agua y puerta de cristal |
@@ -116,7 +123,7 @@ El programa lee las texturas directamente del ZIP con su propio DEFLATE.
 
 ## La escena
 
-Siguiendo el diorama de referencia: isla flotante con un **templo de columnas** y su
+Tres islas. La central sigue el diorama de referencia: isla flotante con un **templo de columnas** y su
 puerta de cristal iluminada, un **dragón blanco y rojo enrollado alrededor del
 templo** —lana blanca, cresta de lana y concreto rojo, espinas negras, garganta de
 netherrack y ojos de glowstone— que da vuelta y media a la columnata y saca la
@@ -124,6 +131,18 @@ cabeza por encima de la cumbrera, un **gran árbol** sobre un afloramiento rocos
 que cruza la isla y cae por los dos bordes, un **puente de piedra** con linternas, y
 una **ruina** de columnas rotas en primer plano. Debajo, vetas de oro, hierro y
 diamante que solo se ven al orbitar por abajo.
+
+A los lados, dos islas más pequeñas generadas con el mismo ruido, unidas a la
+principal por **puentes de madera** con cubierta de tablones, borde de *slabs*,
+barandas de cercas y postes colgando al vacío:
+
+- **Isla del Nether** (oeste): netherrack y arena de almas, una poza de **lava**,
+  magma brillando por el envés de la isla, un arco roto de ladrillo del Nether y un
+  **portal al Nether** de obsidiana, transparente, refractante y encendido.
+- **Granja** (este): casa de tablones con esquinas de tronco, ventanas de vidrio y
+  techo de *slabs*; un campo de **trigo** en surcos sobre tierra de labor regada por
+  un canal; pilas de **heno**; y un corral de cercas con una vaca y dos ovejas
+  construidas con bloques.
 
 ## Rendimiento
 
@@ -156,7 +175,7 @@ Los dos caminos interactivos cuestan bastante menos que un frame completo:
 
 | Camino (900×600, 16 hilos) | ms/frame | píxeles trazados |
 |---|---|---|
-| Frame completo | 24.1 | 100% |
+| Frame completo | 27.7 | 100% |
 | Arrastrando (tablero) | **14.6** (69 fps) | 50% |
 | En reposo (refresco selectivo) | **16.0** | 49% |
 
@@ -187,6 +206,7 @@ src/
   daylight.rs    ciclo día/noche: sol, luna, paletas de cielo y ambiente
   terrain.rs     generación procedural de la isla, el montículo y el río
   structures.rs  templo, dragón, gran árbol, puente, ruina y las luces
+  neighbours.rs  composición del mundo: isla del Nether, granja y los puentes
   world.rs       grid de vóxeles + DDA
   camera.rs      cámara orbital
   skybox.rs      cielo procedural y cubemap

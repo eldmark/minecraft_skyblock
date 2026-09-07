@@ -693,7 +693,7 @@ mod tests {
     #[test]
     fn rendering_is_deterministic_across_thread_counts() {
         let Some(scene) = scene() else { return };
-        let camera = Camera::new(vec3(16.0, 22.0, 16.0), 60.0);
+        let camera = Camera::new(vec3(56.0, 22.0, 24.0), 60.0);
         let mut a = Framebuffer::new(53, 31);
         let mut b = Framebuffer::new(53, 31);
 
@@ -710,7 +710,7 @@ mod tests {
     #[test]
     fn the_island_renders_with_texture_detail() {
         let Some(scene) = scene() else { return };
-        let camera = Camera::new(vec3(16.0, 22.0, 16.0), 60.0);
+        let camera = Camera::new(vec3(56.0, 22.0, 24.0), 60.0);
         let mut frame = Framebuffer::new(120, 90);
         Renderer::new().render(&mut frame, &scene, &camera);
 
@@ -731,7 +731,7 @@ mod tests {
     #[test]
     fn animated_textures_change_between_ticks() {
         let Some(mut scene) = scene() else { return };
-        let camera = Camera::new(vec3(16.0, 24.0, 16.0), 45.0);
+        let camera = Camera::new(vec3(56.0, 24.0, 24.0), 45.0);
         let mut a = Framebuffer::new(96, 72);
         let mut b = Framebuffer::new(96, 72);
         Renderer::new().render(&mut a, &scene, &camera);
@@ -765,8 +765,10 @@ mod tests {
         // normals across it: a normal-mapped surface must not return one constant.
         let mut normals = std::collections::HashSet::new();
         for i in 0..40 {
-            let x = 14.0 + i as f32 * 0.05;
-            let ray = Ray::new(vec3(x, 60.0, 16.0), vec3(0.0, -1.0, 0.0));
+            // The shrine's floor, in world coordinates: the main island now sits
+            // at `terrain::ORIGIN` inside a wider world.
+            let x = 54.0 + i as f32 * 0.05;
+            let ray = Ray::new(vec3(x, 59.0, 24.0), vec3(0.0, -1.0, 0.0));
             if let Some((hit, _)) = first_visible_hit(&scene, &ray) {
                 let frame = scene.animation_frame(scene.assets.frame_count(hit.block, hit.face));
                 let n = shaded_normal(&scene, &hit, frame);
@@ -787,7 +789,7 @@ mod tests {
     #[test]
     fn the_idle_image_never_jumps_once_it_has_settled() {
         let Some(mut scene) = scene() else { return };
-        let camera = Camera::new(vec3(24.0, 34.0, 24.0), 80.0);
+        let camera = Camera::new(vec3(64.0, 34.0, 32.0), 80.0);
         let mut frame = Framebuffer::new(96, 72);
         let mut renderer = Renderer::new();
 
@@ -828,7 +830,7 @@ mod tests {
     #[test]
     fn selective_refresh_keeps_the_image_current() {
         let Some(mut scene) = scene() else { return };
-        let camera = Camera::new(vec3(24.0, 34.0, 24.0), 80.0);
+        let camera = Camera::new(vec3(64.0, 34.0, 32.0), 80.0);
         let mut refined = Framebuffer::new(120, 90);
         let mut renderer = Renderer::new();
 
@@ -877,7 +879,7 @@ mod tests {
     #[test]
     fn two_moving_frames_cover_every_pixel() {
         let Some(scene) = scene() else { return };
-        let camera = Camera::new(vec3(24.0, 34.0, 24.0), 90.0);
+        let camera = Camera::new(vec3(64.0, 34.0, 32.0), 90.0);
         let mut moving = Framebuffer::new(96, 72);
         let mut renderer = Renderer::new();
 
@@ -905,7 +907,7 @@ mod tests {
     #[test]
     fn a_resize_forces_a_full_moving_frame() {
         let Some(scene) = scene() else { return };
-        let camera = Camera::new(vec3(24.0, 34.0, 24.0), 90.0);
+        let camera = Camera::new(vec3(64.0, 34.0, 32.0), 90.0);
         let mut frame = Framebuffer::new(64, 48);
         let mut renderer = Renderer::new();
         renderer.render_moving(&mut frame, &scene, &camera);
@@ -922,7 +924,7 @@ mod tests {
     #[test]
     fn the_window_loop_never_leaves_black_holes() {
         let Some(mut scene) = scene() else { return };
-        let camera = Camera::new(vec3(24.0, 34.0, 24.0), 80.0);
+        let camera = Camera::new(vec3(64.0, 34.0, 32.0), 80.0);
         let mut frame = Framebuffer::new(120, 90);
         let mut renderer = Renderer::new();
 
@@ -942,7 +944,7 @@ mod tests {
     #[test]
     fn the_running_average_smooths_a_single_sample() {
         let Some(scene) = scene() else { return };
-        let camera = Camera::new(vec3(24.0, 34.0, 24.0), 80.0);
+        let camera = Camera::new(vec3(64.0, 34.0, 32.0), 80.0);
         let mut one = Framebuffer::new(80, 60);
         let mut many = Framebuffer::new(80, 60);
 
@@ -974,7 +976,7 @@ mod tests {
     #[test]
     fn scaled_rendering_still_fills_the_framebuffer() {
         let Some(scene) = scene() else { return };
-        let camera = Camera::new(vec3(16.0, 22.0, 16.0), 60.0);
+        let camera = Camera::new(vec3(56.0, 22.0, 24.0), 60.0);
         let mut frame = Framebuffer::new(64, 48);
         let mut r = Renderer::new();
         r.scale = 3;

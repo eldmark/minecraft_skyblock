@@ -392,6 +392,108 @@ impl Assets {
                 },
             ),
             (
+                // Slabs and fences reuse the plank texture, as the game does: the
+                // shape is in `blocks::shape`, not in the material.
+                blocks::OAK_SLAB,
+                "oak_planks",
+                "oak_planks",
+                "oak_planks",
+                Material::diffuse(2.5),
+            ),
+            (
+                blocks::OAK_FENCE,
+                "oak_planks",
+                "oak_planks",
+                "oak_planks",
+                Material::diffuse(2.5),
+            ),
+            (
+                blocks::NETHER_BRICKS,
+                "nether_bricks",
+                "nether_bricks",
+                "nether_bricks",
+                Material::diffuse(3.0),
+            ),
+            (
+                blocks::SOUL_SAND,
+                "soul_sand",
+                "soul_sand",
+                "soul_sand",
+                Material::diffuse(3.5),
+            ),
+            (
+                // Magma glows from the cracks between its plates.
+                blocks::MAGMA,
+                "magma",
+                "magma",
+                "magma",
+                Material::diffuse(2.5)
+                    .with_tint(vec3(1.0, 0.72, 0.45))
+                    .with_emission(1.4),
+            ),
+            (
+                // Lava is the nether island's key light: bright, warm, animated,
+                // and just glossy enough to catch the sky at a grazing angle.
+                blocks::LAVA,
+                "lava_still",
+                "lava_still",
+                "lava_still",
+                Material {
+                    specular: 0.18,
+                    shininess: 24.0,
+                    emission: 4.0,
+                    tint: vec3(1.0, 0.68, 0.34),
+                    ..Material::default()
+                },
+            ),
+            (
+                // The nether portal: transparent, refracting and lit from within,
+                // the same trick as the crystal gate but in purple.
+                blocks::NETHER_PORTAL,
+                "nether_portal",
+                "nether_portal",
+                "nether_portal",
+                Material::refractive(0.55, 1.25, 0.18)
+                    .with_tint(vec3(0.86, 0.45, 1.0))
+                    .with_emission(2.2),
+            ),
+            (
+                blocks::HAY_BLOCK,
+                "hay_block_top",
+                "hay_block_side",
+                "hay_block_top",
+                Material::diffuse(2.5),
+            ),
+            (
+                blocks::FARMLAND,
+                "farmland_moist",
+                "dirt",
+                "dirt",
+                Material::diffuse(3.0),
+            ),
+            (
+                // The crop is drawn from a texture with holes in it, on a box
+                // inset from the cell: the alpha does the shape the geometry does
+                // not.
+                blocks::WHEAT,
+                "wheat_stage7",
+                "wheat_stage7",
+                "wheat_stage7",
+                Material::diffuse(1.5),
+            ),
+            (
+                blocks::BROWN_WOOL,
+                "brown_wool",
+                "brown_wool",
+                "brown_wool",
+                Material {
+                    specular: 0.10,
+                    shininess: 12.0,
+                    normal_strength: 2.5,
+                    ..Material::default()
+                },
+            ),
+            (
                 blocks::FLOWERING_LEAVES,
                 "flowering_azalea_leaves",
                 "flowering_azalea_leaves",
