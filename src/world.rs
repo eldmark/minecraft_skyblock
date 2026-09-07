@@ -22,8 +22,6 @@ pub enum Shape {
     Slab,
     /// A centre post, plus rails towards whichever neighbours are solid.
     Fence,
-    /// Inset on all sides: crops, which are drawn from a texture with holes.
-    Crop,
 }
 
 /// An axis-aligned box inside a voxel, in cell-local `[0, 1]` coordinates.
@@ -227,10 +225,6 @@ impl World {
             }
             Shape::Slab => {
                 out[0] = ([0.0, 0.0, 0.0], [1.0, 0.5, 1.0]);
-                1
-            }
-            Shape::Crop => {
-                out[0] = ([0.1, 0.0, 0.1], [0.9, 0.95, 0.9]);
                 1
             }
             Shape::Fence => {
