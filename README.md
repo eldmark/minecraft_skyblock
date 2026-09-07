@@ -41,7 +41,7 @@ cargo run --release -- --bench 30                # medición de ms/frame
 cargo run --release -- --bench-idle 60           # medición del frame en reposo
 cargo run --release -- --bench-move 60           # medición del frame mientras se arrastra
 cargo run --release -- --check-pack              # verifica la carga del texture pack
-cargo test --release                             # 134 pruebas
+cargo test --release                             # 136 pruebas
 ```
 
 Opciones: `--width W --height H --seed N --threads N --samples N --sky-panorama
@@ -58,8 +58,10 @@ que es como se arma el video del ciclo.
 
 | Tecla / acción | Efecto |
 |---|---|
+| Mover el mouse | Girar la cámara, con **mouselook** activo (como en el juego) |
+| `Tab` | Activar / desactivar mouselook (se activa solo al entrar en vuelo con `F`) |
+| Arrastrar mouse | Girar la cámara arrastrando la escena, con mouselook apagado |
 | Flechas | Girar la cámara (arriba mira hacia arriba) |
-| Arrastrar mouse | Girar la cámara arrastrando la escena |
 | `W` / `S` | Acercar-alejar (órbita) · avanzar-retroceder (vuelo) |
 | `A` / `D` | Girar alrededor de la isla (órbita) · desplazarse a los lados (vuelo) |
 | `Espacio` / `Shift` | Subir / bajar (vuelo) |
@@ -69,8 +71,8 @@ que es como se arma el video del ciclo.
 | `Enter` | Usar el objeto elegido (mantener, en el reloj y la brújula) |
 | `Q` | Arrancar / detener el **ciclo de día y noche** |
 | `E` | Abrir / cerrar el **inventario** |
-| Click izquierdo | Quitar el bloque bajo el puntero |
-| Click derecho | Poner el bloque elegido contra la cara clickeada |
+| Click izquierdo | Quitar el bloque apuntado (la cruz, o el puntero sin mouselook) |
+| Click derecho | Poner el bloque elegido contra la cara apuntada |
 | `F` | Alternar entre **órbita** y **vuelo libre** |
 | `H` | Mostrar u ocultar la hotbar |
 | `,` / `.` | Mover la hora a mano |

@@ -198,7 +198,8 @@ impl Args {
 const USAGE: &str = "\
 usage: skyblock [--window | --render DIR | --bench N] [--frames N] [--width W] [--height H]
 
-  --window         live window (default): arrows or drag to turn, WASD to move,
+  --window         live window (default): mouse (Tab), arrows or drag to turn,
+                   WASD to move,
                    F toggles free flight (Space/Shift up-down, Ctrl sprints),
                    Q runs the day/night cycle, E opens the inventory,
                    left click breaks a block and right click places it,
@@ -430,17 +431,30 @@ fn run_window(args: &Args) -> io::Result<()> {
         if input.toggle_inventory {
             hud.toggle_inventory();
         }
+        // Mouselook is the free-flight default, the way it is in the game: F
+        // turns it on with the flight, Tab switches it by hand, and the
+        // inventory hands the pointer back so its cells can be clicked.
+        if input.toggle_mouselook {
+            let on = !win.mouselook();
+            win.set_mouselook(on);
+            println!("mouselook {}", if on { "on" } else { "off" });
+        }
+        if hud.open && win.mouselook() {
+            win.set_mouselook(false);
+        }
 
         // Mouse over the world: left click breaks the block under the pointer,
         // right click puts the held one against the face that was clicked. With
         // the inventory up the same click picks a block out of the grid instead.
         let mut edited = false;
-        if let Some((mx, my)) = input.mouse {
+        if let Some((mx, my)) = input.aim {
             let (fw, fh) = (frame.width, frame.height);
             let inside = mx >= 0.0 && my >= 0.0 && (mx as usize) < fw && (my as usize) < fh;
             if hud.open {
+                // The inventory is clicked with the pointer, never the crosshair.
                 if input.click_left {
-                    if let Some((block, icon)) = hud.inventory_pick(&frame, mx, my) {
+                    let (cx, cy) = input.mouse.unwrap_or((mx, my));
+                    if let Some((block, icon)) = hud.inventory_pick(&frame, cx, cy) {
                         hud.set_held(block, icon);
                         hud.say(format!("bloque: {}", blocks::name(block)));
                     }
@@ -497,6 +511,7 @@ fn run_window(args: &Args) -> io::Result<()> {
                 CameraMode::Free => CameraMode::Orbit,
             };
             camera.set_mode(next);
+            win.set_mouselook(next == CameraMode::Free && !hud.open);
             println!(
                 "camera: {}",
                 match next {
@@ -608,9 +623,11 @@ fn run_window(args: &Args) -> io::Result<()> {
             1000.0 / ms.max(0.001),
             renderer.threads,
             renderer.samples.max(1),
-            match camera.mode {
-                CameraMode::Orbit => "orbit (F: fly)",
-                CameraMode::Free => "free flight (F: orbit)",
+            match (camera.mode, win.mouselook()) {
+                (CameraMode::Orbit, false) => "orbit (F: fly)",
+                (CameraMode::Orbit, true) => "orbit + mouselook (F: fly)",
+                (CameraMode::Free, false) => "free flight (Tab: mouselook)",
+                (CameraMode::Free, true) => "free flight + mouselook (F: orbit)",
             },
             scene.clock(),
             if scene.cycle_running {

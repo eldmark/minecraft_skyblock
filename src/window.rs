@@ -37,6 +37,13 @@ pub struct Input {
     pub toggle_hud: bool,
     /// `E` opens and closes the inventory.
     pub toggle_inventory: bool,
+    /// Tab turns mouselook on and off.
+    pub toggle_mouselook: bool,
+    /// Whether the camera is currently following the mouse without a button.
+    pub mouselook: bool,
+    /// The pixel a click aims at: the crosshair under mouselook, the cursor
+    /// otherwise.
+    pub aim: Option<(f32, f32)>,
     /// Where the cursor is, in pixels, when it is over the window.
     pub mouse: Option<(f32, f32)>,
     /// Left button pressed and released without dragging: dragging is how the
@@ -69,6 +76,9 @@ pub struct WindowOutput {
     press_at: Option<(f32, f32)>,
     dragged: f32,
     right_was_down: bool,
+    /// Minecraft-style look: the camera follows the mouse with no button held,
+    /// the pointer is hidden and clicks aim at the crosshair.
+    mouselook: bool,
 }
 
 impl WindowOutput {
@@ -92,7 +102,20 @@ impl WindowOutput {
             press_at: None,
             dragged: 0.0,
             right_was_down: false,
+            mouselook: false,
         })
+    }
+
+    /// Turn mouselook on or off, hiding the pointer with it.
+    pub fn set_mouselook(&mut self, on: bool) {
+        if self.mouselook != on {
+            self.mouselook = on;
+            self.window.set_cursor_visibility(!on);
+        }
+    }
+
+    pub fn mouselook(&self) -> bool {
+        self.mouselook
     }
 
     pub fn is_open(&self) -> bool {
@@ -101,21 +124,50 @@ impl WindowOutput {
 
     /// Collect this frame's camera intent. Arrows and the mouse turn the camera,
     /// W/A/S/D move it, Space and Shift fly up and down, Q runs the cycle, E
-    /// opens the inventory, and the mouse buttons edit the world.
+    /// opens the inventory, Tab switches mouselook, and the mouse buttons edit
+    /// the world.
     pub fn poll_input(&mut self) -> Input {
         let mut input = Input::default();
 
         let dragging = self.window.get_mouse_down(MouseButton::Left);
         let mouse = self.window.get_mouse_pos(MouseMode::Pass);
+        let (win_w, win_h) = self.window.get_size();
         input.mouse = mouse;
-        match (dragging, mouse, self.last_mouse) {
-            (true, Some(now), Some(prev)) => {
-                input.orbit = (now.0 - prev.0, now.1 - prev.1);
-                self.dragged += input.orbit.0.abs() + input.orbit.1.abs();
-                self.last_mouse = Some(now);
+        input.mouselook = self.mouselook;
+        input.aim = if self.mouselook {
+            Some((win_w as f32 / 2.0, win_h as f32 / 2.0))
+        } else {
+            mouse
+        };
+
+        // Nothing follows the mouse while the window is not the one being used:
+        // otherwise a pointer left resting in the border margin would keep the
+        // camera spinning in the background.
+        if self.mouselook && self.window.is_active() {
+            // The camera follows the pointer with no button held. There is no
+            // pointer lock to be had here — the platform layer cannot warp the
+            // cursor — so when it reaches the edge of the window the view keeps
+            // turning by itself instead of stopping dead.
+            if let (Some(now), Some(prev)) = (mouse, self.last_mouse) {
+                input.orbit.0 += now.0 - prev.0;
+                input.orbit.1 -= now.1 - prev.1;
             }
-            (true, Some(now), None) => self.last_mouse = Some(now),
-            _ => self.last_mouse = None,
+            if let Some(now) = mouse {
+                let (px, py) = edge_push(now, (win_w as f32, win_h as f32));
+                input.orbit.0 += px;
+                input.orbit.1 -= py;
+            }
+            self.last_mouse = mouse;
+        } else {
+            match (dragging, mouse, self.last_mouse) {
+                (true, Some(now), Some(prev)) => {
+                    input.orbit = (now.0 - prev.0, now.1 - prev.1);
+                    self.dragged += input.orbit.0.abs() + input.orbit.1.abs();
+                    self.last_mouse = Some(now);
+                }
+                (true, Some(now), None) => self.last_mouse = Some(now),
+                _ => self.last_mouse = None,
+            }
         }
 
         // A click is a press and a release that did not travel: the same button
@@ -126,7 +178,9 @@ impl WindowOutput {
                 self.dragged = 0.0;
             }
             (false, Some(at)) => {
-                if self.dragged < 4.0 {
+                // Under mouselook the button never turns the camera, so every
+                // press is a click however far the pointer travelled.
+                if self.mouselook || self.dragged < 4.0 {
                     input.click_left = true;
                     input.mouse = input.mouse.or(Some(at));
                 }
@@ -178,6 +232,7 @@ impl WindowOutput {
         input.reseed = self.window.is_key_pressed(Key::R, minifb::KeyRepeat::No);
         input.toggle_cycle = self.window.is_key_pressed(Key::Q, minifb::KeyRepeat::No);
         input.toggle_inventory = self.window.is_key_pressed(Key::E, minifb::KeyRepeat::No);
+        input.toggle_mouselook = self.window.is_key_pressed(Key::Tab, minifb::KeyRepeat::No);
         if self.window.is_key_down(Key::Comma) {
             input.time_nudge -= 0.004;
         }
@@ -220,6 +275,26 @@ impl WindowOutput {
     }
 }
 
+/// How hard the view turns while the pointer sits against a border, in the same
+/// units as a mouse delta. Zero anywhere in the middle of the window.
+///
+/// This is what stands in for a pointer lock: without it a look can never turn
+/// further than the window is wide.
+fn edge_push(pos: (f32, f32), size: (f32, f32)) -> (f32, f32) {
+    const MARGIN: f32 = 48.0;
+    const SPEED: f32 = 14.0;
+    let axis = |v: f32, extent: f32| -> f32 {
+        if v < MARGIN {
+            -(MARGIN - v.max(0.0)) / MARGIN * SPEED
+        } else if v > extent - MARGIN {
+            (MARGIN - (extent - v).max(0.0)) / MARGIN * SPEED
+        } else {
+            0.0
+        }
+    };
+    (axis(pos.0, size.0), axis(pos.1, size.1))
+}
+
 impl Output for WindowOutput {
     fn present(&mut self, frame: &Framebuffer) -> io::Result<bool> {
         self.window
@@ -230,5 +305,30 @@ impl Output for WindowOutput {
 
     fn set_status(&mut self, status: &str) {
         self.window.set_title(&format!("{} — {}", self.title, status));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_middle_of_the_window_pushes_the_view_nowhere() {
+        assert_eq!(edge_push((400.0, 300.0), (800.0, 600.0)), (0.0, 0.0));
+    }
+
+    #[test]
+    fn the_borders_keep_the_view_turning() {
+        let size = (800.0, 600.0);
+        let (left, _) = edge_push((2.0, 300.0), size);
+        let (right, _) = edge_push((798.0, 300.0), size);
+        assert!(left < -10.0 && right > 10.0, "{left} {right}");
+        // It builds up across the margin rather than switching on at the edge.
+        let (near, _) = edge_push((40.0, 300.0), size);
+        assert!(near < 0.0 && near > left, "{near} should be gentler than {left}");
+
+        let (_, up) = edge_push((400.0, 1.0), size);
+        let (_, down) = edge_push((400.0, 599.0), size);
+        assert!(up < 0.0 && down > 0.0);
     }
 }
