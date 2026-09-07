@@ -34,7 +34,7 @@ cargo run --release -- --bench 30                # medición de ms/frame
 cargo run --release -- --bench-idle 60           # medición del frame en reposo
 cargo run --release -- --bench-move 60           # medición del frame mientras se arrastra
 cargo run --release -- --check-pack              # verifica la carga del texture pack
-cargo test --release                             # 121 pruebas
+cargo test --release                             # 122 pruebas
 ```
 
 Opciones: `--width W --height H --seed N --threads N --samples N --sky-panorama
@@ -58,14 +58,14 @@ que es como se arma el video del ciclo.
 | `Q` / `E` | Bajar / subir (vuelo) |
 | `Shift` | Moverse más rápido |
 | Scroll | Acercar / alejar |
-| `1`–`6` | Elegir ranura de la hotbar |
+| `1`–`7` | Elegir ranura de la hotbar |
 | `Enter` | Usar el objeto elegido (mantener, en el reloj y la brújula) |
 | `Espacio` | Arrancar / detener el **ciclo de día y noche** |
 | `F` | Alternar entre **órbita** y **vuelo libre** |
 | `H` | Mostrar u ocultar la hotbar |
 | `,` / `.` | Mover la hora a mano |
 | `R` | Regenerar el terreno con otra semilla |
-| `F1`–`F4` | Escala de resolución |
+| `F1`–`F4` | Escala de resolución directa (el telescopio la cicla) |
 | `P` | Captura de pantalla a PNG |
 | `Esc` | Salir |
 
@@ -78,7 +78,8 @@ La hotbar es el menú, y cada objeto es su acción:
 | 3 | Brújula | Mantener `Enter`: regresa la hora (la aguja sigue a la cámara) |
 | 4 | Cuadro | Guarda una captura PNG |
 | 5 | Semillas | Genera otro terreno |
-| 6 | Barrera | Salir |
+| 6 | Telescopio | Sube la escala de resolución: 1 → 2 → 3 → 4 → 1 |
+| 7 | Barrera | Salir |
 
 Mientras la cámara se mueve se traza **medio frame en tablero de ajedrez a resolución
 completa** y el resto conserva el color anterior: mismo costo que media resolución, sin

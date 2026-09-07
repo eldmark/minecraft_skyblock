@@ -428,6 +428,11 @@ fn run_window(args: &Args) -> io::Result<()> {
             Some(hud::Action::TimeBack) => item_nudge = -0.004,
             Some(hud::Action::Screenshot) => want_screenshot = true,
             Some(hud::Action::Reseed) => want_reseed = true,
+            // The spyglass steps 1 -> 2 -> 3 -> 4 -> 1: one item, the whole cycle.
+            Some(hud::Action::Quality) => {
+                quality = quality % 4 + 1;
+                hud.set_quality(quality);
+            }
             Some(hud::Action::Quit) => break,
             None => {}
         }
@@ -485,6 +490,7 @@ fn run_window(args: &Args) -> io::Result<()> {
         }
         if let Some(q) = input.quality {
             quality = q;
+            hud.set_quality(q);
         }
         let (w, h) = win.size();
         let resized = w != frame.width || h != frame.height;

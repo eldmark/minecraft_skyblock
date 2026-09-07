@@ -37,6 +37,8 @@ pub enum Action {
     Screenshot,
     /// Wheat seeds: a new terrain seed, like typing one into a new world.
     Reseed,
+    /// Spyglass: step the resolution scale, 1 to 4 and back to 1.
+    Quality,
     /// Barrier: leave.
     Quit,
 }
@@ -63,7 +65,9 @@ struct Slot {
     frames: Vec<Image>,
     animation: Animation,
     action: Action,
-    label: &'static str,
+    /// Owned rather than static: the spyglass rewrites its own label with the
+    /// resolution it is currently on.
+    label: String,
 }
 
 pub struct Hud {
@@ -92,37 +96,45 @@ impl Hud {
                 frames: vec![pickaxe],
                 animation: Animation::Static,
                 action: Action::ToggleCamera,
-                label: "Camara: orbita / vuelo",
+                label: "Camara: orbita / vuelo".into(),
             },
             Slot {
                 frames: clock,
                 animation: Animation::Clock,
                 action: Action::TimeForward,
-                label: "Reloj: manten para adelantar la hora",
+                label: "Reloj: manten para adelantar la hora".into(),
             },
             Slot {
                 frames: compass,
                 animation: Animation::Compass,
                 action: Action::TimeBack,
-                label: "Brujula: manten para regresar la hora",
+                label: "Brujula: manten para regresar la hora".into(),
             },
             Slot {
                 frames: vec![item("painting")?],
                 animation: Animation::Static,
                 action: Action::Screenshot,
-                label: "Cuadro: guardar una captura PNG",
+                label: "Cuadro: guardar una captura PNG".into(),
             },
             Slot {
                 frames: vec![item("wheat_seeds")?],
                 animation: Animation::Static,
                 action: Action::Reseed,
-                label: "Semillas: generar otro terreno",
+                label: "Semillas: generar otro terreno".into(),
             },
+            Slot {
+                frames: vec![item("spyglass")?],
+                animation: Animation::Static,
+                action: Action::Quality,
+                label: quality_label(1),
+            },
+            // The barrier stays last: it is the one slot you do not want to land
+            // on by accident while stepping along the bar.
             Slot {
                 frames: vec![item("barrier")?],
                 animation: Animation::Static,
                 action: Action::Quit,
-                label: "Barrera: salir",
+                label: "Barrera: salir".into(),
             },
         ];
 
@@ -157,8 +169,20 @@ impl Hud {
         self.slots[self.selected].action
     }
 
-    pub fn label(&self) -> &'static str {
-        self.slots[self.selected].label
+    pub fn label(&self) -> &str {
+        &self.slots[self.selected].label
+    }
+
+    /// Keep the spyglass showing which resolution it is on. The label is the
+    /// only readout: the scale is not visible in the picture until it changes.
+    pub fn set_quality(&mut self, quality: usize) {
+        if let Some(slot) = self
+            .slots
+            .iter_mut()
+            .find(|s| s.action == Action::Quality)
+        {
+            slot.label = quality_label(quality);
+        }
     }
 
     /// Show a line for about a second and a half.
@@ -226,14 +250,14 @@ impl Hud {
         // The label of whatever is selected, above the bar, the way the game
         // names the item you just scrolled to.
         let text_scale = scale.max(1.0);
-        let label = self.slots[self.selected].label;
-        let label_w = self.font.width(label, text_scale);
+        let label = self.slots[self.selected].label.clone();
+        let label_w = self.font.width(&label, text_scale);
         let label_y = bar_y - self.font.height(text_scale) - px(3.0);
         self.font.draw(
             frame,
             (frame.width as i32 - label_w) / 2,
             label_y,
-            label,
+            &label,
             text_scale,
         );
 
@@ -262,6 +286,15 @@ impl Slot {
             }
         };
         &self.frames[index.min(n - 1)]
+    }
+}
+
+/// One step of the resolution cycle, in words: scale 1 traces every pixel, 2
+/// traces one in four, and so on.
+fn quality_label(quality: usize) -> String {
+    match quality {
+        1 => "Telescopio: resolucion completa".to_string(),
+        q => format!("Telescopio: resolucion 1/{q}"),
     }
 }
 
@@ -451,7 +484,7 @@ mod tests {
     #[test]
     fn every_slot_has_an_icon_and_an_action() {
         let Some(hud) = hud() else { return };
-        assert_eq!(hud.slot_count(), 6);
+        assert_eq!(hud.slot_count(), 7);
         let mut actions = Vec::new();
         for (i, slot) in hud.slots.iter().enumerate() {
             assert!(!slot.frames.is_empty(), "slot {i} has no icon");
@@ -466,12 +499,24 @@ mod tests {
                 Action::TimeBack,
                 Action::Screenshot,
                 Action::Reseed,
+                Action::Quality,
                 Action::Quit,
             ]
         );
         // Only the two time items keep firing while the key is held.
         assert!(Action::TimeForward.repeats() && Action::TimeBack.repeats());
         assert!(!Action::Quit.repeats() && !Action::Screenshot.repeats());
+    }
+
+    #[test]
+    fn the_spyglass_reports_the_resolution_it_is_on() {
+        let Some(mut hud) = hud() else { return };
+        hud.select(5);
+        assert!(hud.label().contains("completa"), "{}", hud.label());
+        hud.set_quality(3);
+        assert!(hud.label().contains("1/3"), "{}", hud.label());
+        // The barrier is last, so stepping along the bar never lands on it first.
+        assert_eq!(hud.slots.last().map(|s| s.action), Some(Action::Quit));
     }
 
     #[test]
@@ -553,4 +598,5 @@ mod tests {
         assert_eq!(icon.rgba.len(), 4 * 4 * 4);
     }
 }
+
 
