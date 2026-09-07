@@ -200,7 +200,9 @@ usage: skyblock [--window | --render DIR | --bench N] [--frames N] [--width W] [
 
   --window         live window (default): arrows or drag to turn, WASD to move,
                    F toggles free flight (Space/Shift up-down, Ctrl sprints),
-                   E runs the day/night cycle, R reseeds, P screenshots, Esc quits
+                   Q runs the day/night cycle, E opens the inventory,
+                   left click breaks a block and right click places it,
+                   R reseeds, P screenshots, Esc quits
   --render DIR     write an orbit as PNG frames, no window
   --bench N        render N frames and report ms/frame
   --bench-idle N   time N refinement frames with a still camera
@@ -248,6 +250,16 @@ fn scene_camera(world: &World) -> Camera {
     );
     // Far enough back to hold the three islands and both bridges.
     Camera::new(center, world.size[0] as f32 * 1.0)
+}
+
+/// The cell a right click fills: the one against the face that was hit.
+fn placement_cell(hit: &world::Hit) -> (i32, i32, i32) {
+    let n = hit.face.normal();
+    (
+        hit.voxel[0] + n.x as i32,
+        hit.voxel[1] + n.y as i32,
+        hit.voxel[2] + n.z as i32,
+    )
 }
 
 fn run_headless(mut out: Box<dyn Output>, args: &Args, report: bool) -> io::Result<()> {
@@ -415,6 +427,44 @@ fn run_window(args: &Args) -> io::Result<()> {
         if input.toggle_hud {
             hud_visible = !hud_visible;
         }
+        if input.toggle_inventory {
+            hud.toggle_inventory();
+        }
+
+        // Mouse over the world: left click breaks the block under the pointer,
+        // right click puts the held one against the face that was clicked. With
+        // the inventory up the same click picks a block out of the grid instead.
+        let mut edited = false;
+        if let Some((mx, my)) = input.mouse {
+            let (fw, fh) = (frame.width, frame.height);
+            let inside = mx >= 0.0 && my >= 0.0 && (mx as usize) < fw && (my as usize) < fh;
+            if hud.open {
+                if input.click_left {
+                    if let Some((block, icon)) = hud.inventory_pick(&frame, mx, my) {
+                        hud.set_held(block, icon);
+                        hud.say(format!("bloque: {}", blocks::name(block)));
+                    }
+                }
+            } else if inside && (input.click_left || input.click_right) {
+                let ray = camera.ray(mx as usize, my as usize, fw, fh, (0.5, 0.5));
+                if let Some(hit) = scene.world().trace(&ray, 400.0, |b| b != blocks::AIR) {
+                    if input.click_left {
+                        let [x, y, z] = hit.voxel;
+                        scene.set_block(x, y, z, blocks::AIR);
+                        edited = true;
+                    } else if let Some(block) = hud.held() {
+                        // Against the face that was hit, the way the game does it.
+                        let (x, y, z) = placement_cell(&hit);
+                        if scene.world().get(x, y, z) == blocks::AIR {
+                            scene.set_block(x, y, z, block);
+                            edited = true;
+                        }
+                    } else if input.click_right {
+                        hud.say("elige un bloque con E");
+                    }
+                }
+            }
+        }
         let mut fired = None;
         if input.use_item || (input.use_held && hud.action().repeats()) {
             fired = Some(hud.action());
@@ -436,6 +486,8 @@ fn run_window(args: &Args) -> io::Result<()> {
                 hud.set_quality(quality);
             }
             Some(hud::Action::Quit) => break,
+            // The block slot does nothing on Enter: it is worked with the mouse.
+            Some(hud::Action::Place) => {}
             None => {}
         }
 
@@ -503,10 +555,13 @@ fn run_window(args: &Args) -> io::Result<()> {
         // until the image converges, which is where the antialiasing comes from.
         // A change of light is not a change of geometry: the picture stays, every
         // pixel is simply re-shaded at full resolution and folded into the average.
-        if time_changed {
+        if time_changed || edited {
             renderer.mark_all_active();
         }
-        let moving = !input.is_idle() || resized || want_reseed;
+        if edited {
+            renderer.invalidate_moving();
+        }
+        let moving = !input.is_idle() || resized || want_reseed || edited;
         if moving {
             if resized || want_reseed {
                 renderer.invalidate_moving();
@@ -559,9 +614,9 @@ fn run_window(args: &Args) -> io::Result<()> {
             },
             scene.clock(),
             if scene.cycle_running {
-                "(E: running)"
+                "(Q: running)"
             } else {
-                "(E: paused)"
+                "(Q: paused)"
             },
             hud.label()
         ));
@@ -643,6 +698,7 @@ fn main() -> io::Result<()> {
 #[cfg(test)]
 mod scene_tests {
     use super::*;
+    use std::path::Path;
 
     #[test]
     fn the_placeholder_island_is_visible_from_the_default_camera() {
@@ -659,6 +715,45 @@ mod scene_tests {
             }
         }
         assert!(hits > w * h / 20, "island should cover part of the frame, hits={hits}");
+    }
+
+    #[test]
+    fn a_click_breaks_the_block_it_lands_on_and_puts_one_back_on_its_face() {
+        let Some(pack) = (Path::new("texturepack").is_dir())
+            .then(|| pack::Pack::open(None).ok())
+            .flatten()
+        else {
+            return;
+        };
+        let mut scene = Scene::load(2024, &pack, false, 0.25).unwrap();
+        let camera = scene_camera(scene.world());
+        let (w, h) = (200usize, 150usize);
+
+        // Aim at the middle of the frame and find something solid.
+        let ray = camera.ray(w / 2, h / 2, w, h, (0.5, 0.5));
+        let hit = scene
+            .world()
+            .trace(&ray, 400.0, |b| b != blocks::AIR)
+            .expect("the camera should be looking at the island");
+        let [x, y, z] = hit.voxel;
+        assert_ne!(scene.world().get(x, y, z), blocks::AIR);
+
+        // Breaking it empties the cell...
+        scene.set_block(x, y, z, blocks::AIR);
+        assert_eq!(scene.world().get(x, y, z), blocks::AIR);
+
+        // ...and placing goes against the face that was hit, never inside it.
+        let (px, py, pz) = placement_cell(&hit);
+        assert_ne!((px, py, pz), (x, y, z));
+        scene.set_block(px, py, pz, blocks::GLOWSTONE);
+        assert_eq!(scene.world().get(px, py, pz), blocks::GLOWSTONE);
+
+        // A new emitter is a new light: the scene re-collects them on every edit.
+        let p = vec3(px as f32 + 0.5, py as f32 + 0.5, pz as f32 + 0.5);
+        assert!(
+            scene.lights.iter().any(|(c, _)| (*c - p).length() < 3.0),
+            "the placed lamp did not become a light"
+        );
     }
 
     #[test]

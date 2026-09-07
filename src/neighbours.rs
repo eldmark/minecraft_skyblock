@@ -335,10 +335,7 @@ fn house(world: &mut World, at: (i32, i32, i32)) {
 
     for z in cz - d..=cz + d {
         for x in cx - w..=cx + w {
-            // The middle of the floor is glowstone: it lights the room, and a
-            // window is only readable from an angle if what is behind it is lit.
-            let lit = (x - cx).abs() <= 1 && (z - cz).abs() <= 1;
-            world.set(x, base, z, if lit { GLOWSTONE } else { OAK_PLANKS });
+            world.set(x, base, z, OAK_PLANKS);
         }
     }
 
@@ -368,21 +365,6 @@ fn house(world: &mut World, at: (i32, i32, i32)) {
                     OAK_PLANKS
                 };
                 world.set(x, y, z, block);
-                if window {
-                    // A lamp right behind the pane. Ozocraft's glass is a dark
-                    // frame around a transparent middle, so a window onto an
-                    // unlit room reads as a hole punched in the wall; backed by
-                    // light it reads as a window, and the house has something to
-                    // show after dark.
-                    // Straight in through the pane, along the wall's own normal:
-                    // set diagonally it lights the room but not the window.
-                    let (ix, iz) = if x == cx - w || x == cx + w {
-                        ((cx - x).signum(), 0)
-                    } else {
-                        (0, (cz - z).signum())
-                    };
-                    world.set(x + ix, y, z + iz, GLOWSTONE);
-                }
             }
         }
     }

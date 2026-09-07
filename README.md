@@ -13,7 +13,9 @@ Las dos islas vecinas, unidas a la principal por puentes de madera con barandas:
 ![La granja](screenshots/farm.png)
 
 La hotbar de Minecraft hace de menú: se elige la ranura con los números y se usa
-con `Enter`.
+con `Enter`. Con `E` se abre un inventario de 32 bloques; el elegido va a la última
+ranura y se pone en el mundo con click derecho, mientras el izquierdo quita el
+bloque que haya bajo el puntero.
 
 ![La hotbar como menú](screenshots/hud.png)
 
@@ -39,7 +41,7 @@ cargo run --release -- --bench 30                # medición de ms/frame
 cargo run --release -- --bench-idle 60           # medición del frame en reposo
 cargo run --release -- --bench-move 60           # medición del frame mientras se arrastra
 cargo run --release -- --check-pack              # verifica la carga del texture pack
-cargo test --release                             # 129 pruebas
+cargo test --release                             # 134 pruebas
 ```
 
 Opciones: `--width W --height H --seed N --threads N --samples N --sky-panorama
@@ -63,9 +65,12 @@ que es como se arma el video del ciclo.
 | `Espacio` / `Shift` | Subir / bajar (vuelo) |
 | `Ctrl` | Moverse más rápido |
 | Scroll | Acercar / alejar |
-| `1`–`7` | Elegir ranura de la hotbar |
+| `1`–`8` | Elegir ranura de la hotbar |
 | `Enter` | Usar el objeto elegido (mantener, en el reloj y la brújula) |
-| `E` | Arrancar / detener el **ciclo de día y noche** |
+| `Q` | Arrancar / detener el **ciclo de día y noche** |
+| `E` | Abrir / cerrar el **inventario** |
+| Click izquierdo | Quitar el bloque bajo el puntero |
+| Click derecho | Poner el bloque elegido contra la cara clickeada |
 | `F` | Alternar entre **órbita** y **vuelo libre** |
 | `H` | Mostrar u ocultar la hotbar |
 | `,` / `.` | Mover la hora a mano |
@@ -85,6 +90,7 @@ La hotbar es el menú, y cada objeto es su acción:
 | 5 | Semillas | Genera otro terreno |
 | 6 | Telescopio | Sube la escala de resolución: 1 → 2 → 3 → 4 → 1 |
 | 7 | Barrera | Salir |
+| 8 | Bloque | El que se eligió en el inventario (`E`); click derecho lo pone |
 
 Mientras la cámara se mueve se traza **medio frame en tablero de ajedrez a resolución
 completa** y la otra mitad se **interpola de sus dos vecinos de ese mismo frame**:
@@ -121,7 +127,7 @@ El programa lee las texturas directamente del ZIP con su propio DEFLATE.
 | Mapas normales | `texture.rs` — derivados por Sobel de la luminancia de cada textura |
 | Material emisivo | glowstone y la puerta, como luces puntuales reales |
 | Skybox | `skybox.rs` — cielo procedural que sigue la hora (por defecto) o cubemap del panorama |
-| Ciclo día/noche | `daylight.rs` — sol, luna, paleta del cielo y ambiente desde un solo número; tecla `E` |
+| Ciclo día/noche | `daylight.rs` — sol, luna, paleta del cielo y ambiente desde un solo número; tecla `Q` |
 | Paralelismo y optimización | `parallel.rs`, tabla de mediciones abajo |
 
 ## La escena

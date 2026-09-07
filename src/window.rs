@@ -15,7 +15,7 @@ pub struct Input {
     pub reseed: bool,
     pub screenshot: bool,
     pub quality: Option<usize>,
-    /// `E` starts and stops the day/night cycle.
+    /// `Q` starts and stops the day/night cycle.
     pub toggle_cycle: bool,
     /// `,` and `.` nudge the clock by hand, in fractions of a day.
     pub time_nudge: f32,
@@ -35,6 +35,15 @@ pub struct Input {
     pub use_held: bool,
     /// `H` hides and shows the overlay.
     pub toggle_hud: bool,
+    /// `E` opens and closes the inventory.
+    pub toggle_inventory: bool,
+    /// Where the cursor is, in pixels, when it is over the window.
+    pub mouse: Option<(f32, f32)>,
+    /// Left button pressed and released without dragging: dragging is how the
+    /// camera turns, so only a click that stays put counts as a click.
+    pub click_left: bool,
+    /// Right button, on the frame it goes down.
+    pub click_right: bool,
 }
 
 impl Input {
@@ -55,6 +64,11 @@ pub struct WindowOutput {
     window: Window,
     title: String,
     last_mouse: Option<(f32, f32)>,
+    /// Where the left button went down, and how far it has travelled since:
+    /// that is what separates a click from a drag.
+    press_at: Option<(f32, f32)>,
+    dragged: f32,
+    right_was_down: bool,
 }
 
 impl WindowOutput {
@@ -75,6 +89,9 @@ impl WindowOutput {
             window,
             title: title.to_string(),
             last_mouse: None,
+            press_at: None,
+            dragged: 0.0,
+            right_was_down: false,
         })
     }
 
@@ -83,20 +100,44 @@ impl WindowOutput {
     }
 
     /// Collect this frame's camera intent. Arrows and the mouse turn the camera,
-    /// W/A/S/D move it, Space and Shift fly up and down, E runs the cycle.
+    /// W/A/S/D move it, Space and Shift fly up and down, Q runs the cycle, E
+    /// opens the inventory, and the mouse buttons edit the world.
     pub fn poll_input(&mut self) -> Input {
         let mut input = Input::default();
 
         let dragging = self.window.get_mouse_down(MouseButton::Left);
         let mouse = self.window.get_mouse_pos(MouseMode::Pass);
+        input.mouse = mouse;
         match (dragging, mouse, self.last_mouse) {
             (true, Some(now), Some(prev)) => {
                 input.orbit = (now.0 - prev.0, now.1 - prev.1);
+                self.dragged += input.orbit.0.abs() + input.orbit.1.abs();
                 self.last_mouse = Some(now);
             }
             (true, Some(now), None) => self.last_mouse = Some(now),
             _ => self.last_mouse = None,
         }
+
+        // A click is a press and a release that did not travel: the same button
+        // turns the camera, so anything that moved is a drag and nothing else.
+        match (dragging, self.press_at) {
+            (true, None) => {
+                self.press_at = mouse;
+                self.dragged = 0.0;
+            }
+            (false, Some(at)) => {
+                if self.dragged < 4.0 {
+                    input.click_left = true;
+                    input.mouse = input.mouse.or(Some(at));
+                }
+                self.press_at = None;
+            }
+            _ => {}
+        }
+
+        let right_down = self.window.get_mouse_down(MouseButton::Right);
+        input.click_right = right_down && !self.right_was_down;
+        self.right_was_down = right_down;
 
         let arrow_step = 6.0;
         if self.window.is_key_down(Key::Left) {
@@ -135,7 +176,8 @@ impl WindowOutput {
         input.toggle_free = self.window.is_key_pressed(Key::F, minifb::KeyRepeat::No);
 
         input.reseed = self.window.is_key_pressed(Key::R, minifb::KeyRepeat::No);
-        input.toggle_cycle = self.window.is_key_pressed(Key::E, minifb::KeyRepeat::No);
+        input.toggle_cycle = self.window.is_key_pressed(Key::Q, minifb::KeyRepeat::No);
+        input.toggle_inventory = self.window.is_key_pressed(Key::E, minifb::KeyRepeat::No);
         if self.window.is_key_down(Key::Comma) {
             input.time_nudge -= 0.004;
         }

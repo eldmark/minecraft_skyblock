@@ -201,11 +201,16 @@ impl Assets {
                 Material::diffuse(2.0).with_emission(3.2),
             ),
             (
+                // Ozocraft's glass is 27% opaque frame in a dark brown, and at
+                // this scale that frame is most of what a window shows. The tint
+                // lifts it to a pale grey and the transparency is nearly total,
+                // so a window reads as a window and the room behind it is
+                // actually visible — no lamp needed behind the pane.
                 blocks::GLASS,
                 "glass",
                 "glass",
                 "glass",
-                Material::refractive(0.88, 1.52, 0.12),
+                Material::refractive(0.96, 1.52, 0.10).with_tint(vec3(3.4, 3.5, 3.6)),
             ),
             (
                 // The portal reads as thick, smoky crystal rather than as water.

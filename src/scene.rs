@@ -160,6 +160,16 @@ impl Scene {
         self.cycle_seconds / LIGHT_STEPS
     }
 
+    /// Put a block into the world, or take one out with `AIR`.
+    ///
+    /// The emissive blocks are re-collected because the edit may have added or
+    /// removed a light; it is a full scan of the grid, which at a few
+    /// milliseconds is nothing next to how often a person clicks.
+    pub fn set_block(&mut self, x: i32, y: i32, z: i32, block: Block) {
+        self.world.set(x, y, z, block);
+        self.lights = structures::collect_lights(&self.world);
+    }
+
     pub fn reseed(&mut self, seed: u32) {
         let mut island = terrain::generate(seed);
         structures::place_all(&mut island);

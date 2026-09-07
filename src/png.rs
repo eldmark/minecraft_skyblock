@@ -149,6 +149,7 @@ mod tests {
 use crate::inflate::inflate_zlib;
 
 /// An 8-bit RGBA image.
+#[derive(Clone)]
 pub struct Image {
     pub width: usize,
     pub height: usize,

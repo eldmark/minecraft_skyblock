@@ -10,13 +10,54 @@
 //! Each slot is an action. The clock and the compass are *held* rather than
 //! pressed, so the hour sweeps while the key is down; everything else fires once.
 
+use crate::blocks::{self, Block};
 use crate::output::Framebuffer;
-use crate::pack::Pack;
+use crate::pack::{Pack, BLOCK_DIR};
 use crate::png::Image;
 
 const GUI_DIR: &str = "assets/minecraft/textures/gui/sprites/hud/";
 const ITEM_DIR: &str = "assets/minecraft/textures/item/";
 const FONT: &str = "assets/minecraft/textures/font/ascii.png";
+
+/// What the inventory offers, and the texture that stands for each block. A few
+/// of them are animation strips in this pack, so only the first frame is used.
+const INVENTORY: &[(Block, &str)] = &[
+    (blocks::GRASS, "grass_block_side"),
+    (blocks::DIRT, "dirt"),
+    (blocks::STONE, "stone"),
+    (blocks::COBBLESTONE, "cobblestone"),
+    (blocks::SAND, "sand"),
+    (blocks::GRAVEL, "gravel"),
+    (blocks::OAK_LOG, "oak_log"),
+    (blocks::OAK_PLANKS, "oak_planks"),
+    (blocks::OAK_LEAVES, "oak_leaves"),
+    (blocks::OAK_SLAB, "oak_planks"),
+    (blocks::OAK_FENCE, "oak_planks"),
+    (blocks::GLASS, "glass"),
+    (blocks::GLOWSTONE, "glowstone"),
+    (blocks::QUARTZ, "quartz_block_side"),
+    (blocks::STONE_BRICKS, "stone_bricks"),
+    (blocks::GOLD_BLOCK, "gold_block"),
+    (blocks::IRON_BLOCK, "iron_block"),
+    (blocks::DIAMOND_BLOCK, "diamond_block"),
+    (blocks::EMERALD_BLOCK, "emerald_block"),
+    (blocks::OBSIDIAN, "obsidian"),
+    (blocks::NETHERRACK, "netherrack"),
+    (blocks::NETHER_BRICKS, "nether_bricks"),
+    (blocks::MAGMA, "magma"),
+    (blocks::SOUL_SAND, "soul_sand"),
+    (blocks::HAY_BLOCK, "hay_block_side"),
+    (blocks::PUMPKIN, "pumpkin_side"),
+    (blocks::WHITE_WOOL, "white_wool"),
+    (blocks::RED_WOOL, "red_wool"),
+    (blocks::RED_CONCRETE, "red_concrete"),
+    (blocks::BLACK_CONCRETE, "black_concrete"),
+    (blocks::WATER, "water_still"),
+    (blocks::LAVA, "lava_still"),
+];
+
+/// Columns in the inventory grid.
+const INVENTORY_COLS: usize = 8;
 
 /// How many animation frames are kept for the clock and the compass. The pack
 /// ships 64 and 32; every fourth one is more than the eye can follow at this
@@ -41,6 +82,8 @@ pub enum Action {
     Quality,
     /// Barrier: leave.
     Quit,
+    /// The block slot: left click breaks, right click places.
+    Place,
 }
 
 impl Action {
@@ -73,7 +116,14 @@ struct Slot {
 pub struct Hud {
     hotbar: Image,
     selection: Image,
+    crosshair: Image,
     slots: Vec<Slot>,
+    /// Every block the inventory can hand out, with its icon.
+    inventory: Vec<(Block, Image)>,
+    /// Whether the inventory screen is up.
+    pub open: bool,
+    /// The block in the hotbar's block slot, placed by a right click.
+    held: Option<Block>,
     font: Font,
     selected: usize,
     /// A line under the hotbar, and how many frames it still has to live.
@@ -128,20 +178,38 @@ impl Hud {
                 action: Action::Quality,
                 label: quality_label(1),
             },
-            // The barrier stays last: it is the one slot you do not want to land
-            // on by accident while stepping along the bar.
+            // The barrier stays last of the tools: it is the one slot you do not
+            // want to land on by accident while stepping along the bar.
             Slot {
                 frames: vec![item("barrier")?],
                 animation: Animation::Static,
                 action: Action::Quit,
                 label: "Barrera: salir".into(),
             },
+            // The block slot, in what used to be the first empty cell. It starts
+            // out empty and the inventory fills it.
+            Slot {
+                frames: Vec::new(),
+                animation: Animation::Static,
+                action: Action::Place,
+                label: "Bloque: E para elegir uno".into(),
+            },
         ];
+
+        let mut inventory = Vec::with_capacity(INVENTORY.len());
+        for (block, texture) in INVENTORY {
+            let image = pack.decode_png(&format!("{BLOCK_DIR}{texture}.png"))?;
+            inventory.push((*block, first_frame(image)));
+        }
 
         Ok(Hud {
             hotbar: pack.decode_png(&format!("{GUI_DIR}hotbar.png"))?,
             selection: pack.decode_png(&format!("{GUI_DIR}hotbar_selection.png"))?,
+            crosshair: pack.decode_png(&format!("{GUI_DIR}crosshair.png"))?,
             slots,
+            inventory,
+            open: false,
+            held: None,
             font: Font::load(pack)?,
             selected: 0,
             message: None,
@@ -190,6 +258,88 @@ impl Hud {
         self.message = Some((text.into(), 90));
     }
 
+    /// The block the block slot is holding, if the inventory has filled it.
+    pub fn held(&self) -> Option<Block> {
+        self.held
+    }
+
+    /// Put a block in the block slot, and select that slot: picking a block from
+    /// the inventory is also saying "this is what I am about to place".
+    pub fn set_held(&mut self, block: Block, icon: Image) {
+        self.held = Some(block);
+        if let Some((index, slot)) = self
+            .slots
+            .iter_mut()
+            .enumerate()
+            .find(|(_, s)| s.action == Action::Place)
+        {
+            slot.frames = vec![icon];
+            slot.label = format!("{}: click izq. quita, der. pone", blocks::name(block));
+            self.selected = index;
+        }
+    }
+
+    /// Open and close the inventory screen.
+    pub fn toggle_inventory(&mut self) {
+        self.open = !self.open;
+    }
+
+    /// Which block the inventory cell under a pixel holds, if any. Returns the
+    /// icon with it so the caller can hand both straight back to `set_held`.
+    pub fn inventory_pick(&self, frame: &Framebuffer, mx: f32, my: f32) -> Option<(Block, Image)> {
+        if !self.open {
+            return None;
+        }
+        let l = self.layout(frame);
+        let (x, y) = (mx.round() as i32, my.round() as i32);
+        let (grid_x, grid_y, cell) = self.inventory_origin(frame, &l);
+        let rows = self.inventory.len().div_ceil(INVENTORY_COLS);
+        if x < grid_x || y < grid_y {
+            return None;
+        }
+        let (col, row) = (((x - grid_x) / cell) as usize, ((y - grid_y) / cell) as usize);
+        if col >= INVENTORY_COLS || row >= rows {
+            return None;
+        }
+        let index = row * INVENTORY_COLS + col;
+        self.inventory
+            .get(index)
+            .map(|(block, icon)| (*block, icon.clone()))
+    }
+
+    /// Geometry of the hotbar, measured from the sprite rather than hard-coded so
+    /// a pack at another resolution still lands on its own slots.
+    fn layout(&self, frame: &Framebuffer) -> Layout {
+        let unit = self.hotbar.width as f32 / 182.0;
+        // Continuous, so the bar keeps the same share of the window instead of
+        // jumping a whole step when it is resized.
+        let scale = (frame.width as f32 / 600.0).clamp(1.0, 2.0);
+        let px = |v: f32| (v * unit * scale).round() as i32;
+        let bar_w = px(182.0);
+        let bar_h = px(22.0);
+        Layout {
+            unit,
+            scale,
+            bar_w,
+            bar_h,
+            bar_x: (frame.width as i32 - bar_w) / 2,
+            bar_y: frame.height as i32 - bar_h - px(4.0),
+        }
+    }
+
+    /// Top-left corner of the inventory grid and the size of one cell.
+    fn inventory_origin(&self, frame: &Framebuffer, l: &Layout) -> (i32, i32, i32) {
+        let cell = l.px(22.0);
+        let rows = self.inventory.len().div_ceil(INVENTORY_COLS) as i32;
+        let width = cell * INVENTORY_COLS as i32;
+        let height = cell * rows;
+        (
+            (frame.width as i32 - width) / 2,
+            (frame.height as i32 - height) / 2 - l.px(10.0),
+            cell,
+        )
+    }
+
     /// Composite the overlay onto a finished frame.
     ///
     /// `time_of_day` drives the clock dial and `yaw` the compass needle, so both
@@ -198,24 +348,30 @@ impl Hud {
         if frame.width == 0 || frame.height == 0 || self.hotbar.width == 0 {
             return;
         }
-        // The pack's hotbar is drawn at twice the vanilla 182x22, so measure the
-        // slot pitch from the sprite instead of hard-coding it: a pack at a
-        // different resolution still lands on its own slots.
-        let unit = self.hotbar.width as f32 / 182.0;
-        // Continuous, so the bar keeps the same share of the window instead of
-        // jumping a whole step when it is resized.
-        let scale = (frame.width as f32 / 600.0).clamp(1.0, 2.0);
-        let px = |v: f32| (v * unit * scale).round() as i32;
+        let l = self.layout(frame);
+        let px = |v: f32| l.px(v);
 
-        let bar_w = px(182.0);
-        let bar_h = px(22.0);
-        let bar_x = (frame.width as i32 - bar_w) / 2;
-        let bar_y = frame.height as i32 - bar_h - px(4.0);
-        blit(frame, &self.hotbar, bar_x, bar_y, bar_w, bar_h, 1.0);
+        // The crosshair marks where a click lands when the mouse is not the one
+        // aiming, and it is the only thing on screen while the inventory is up
+        // that would get in the way, so it goes away then.
+        if !self.open {
+            let size = px(9.0);
+            blit(
+                frame,
+                &self.crosshair,
+                (frame.width as i32 - size) / 2,
+                (frame.height as i32 - size) / 2,
+                size,
+                size,
+                1.0,
+            );
+        }
+
+        blit(frame, &self.hotbar, l.bar_x, l.bar_y, l.bar_w, l.bar_h, 1.0);
 
         // Slot centres: one pixel of border, then nine twenty-pixel cells.
-        let slot_centre = |i: usize| bar_x + px(1.0 + 20.0 * i as f32 + 10.0);
-        let centre_y = bar_y + bar_h / 2;
+        let slot_centre = |i: usize| l.bar_x + px(1.0 + 20.0 * i as f32 + 10.0);
+        let centre_y = l.bar_y + l.bar_h / 2;
 
         // The selection frame overhangs the bar by a pixel on every side, which
         // is why it is 24x23 against the bar's 20x22 cells. It goes on *before*
@@ -234,7 +390,9 @@ impl Hud {
         );
 
         for (i, slot) in self.slots.iter().enumerate() {
-            let icon = slot.frame(time_of_day, yaw);
+            let Some(icon) = slot.frame(time_of_day, yaw) else {
+                continue;
+            };
             let size = px(16.0);
             blit(
                 frame,
@@ -249,10 +407,10 @@ impl Hud {
 
         // The label of whatever is selected, above the bar, the way the game
         // names the item you just scrolled to.
-        let text_scale = scale.max(1.0);
+        let text_scale = l.scale.max(1.0);
         let label = self.slots[self.selected].label.clone();
         let label_w = self.font.width(&label, text_scale);
-        let label_y = bar_y - self.font.height(text_scale) - px(3.0);
+        let label_y = l.bar_y - self.font.height(text_scale) - px(3.0);
         self.font.draw(
             frame,
             (frame.width as i32 - label_w) / 2,
@@ -271,12 +429,84 @@ impl Hud {
                 self.message = None;
             }
         }
+
+        if self.open {
+            self.draw_inventory(frame, &l);
+        }
+    }
+
+    /// The inventory screen: a dimmed frame and a grid of block faces.
+    fn draw_inventory(&self, frame: &mut Framebuffer, l: &Layout) {
+        let (grid_x, grid_y, cell) = self.inventory_origin(frame, l);
+        let rows = self.inventory.len().div_ceil(INVENTORY_COLS) as i32;
+        let pad = l.px(6.0);
+
+        // Dim the whole picture, then draw the panel over it, so the grid reads
+        // as a screen on top of the world rather than as blocks floating in it.
+        dim(frame, 0.45);
+        fill_rect(
+            frame,
+            grid_x - pad,
+            grid_y - pad,
+            cell * INVENTORY_COLS as i32 + pad * 2,
+            cell * rows + pad * 2,
+            0x0021_2126,
+            220,
+        );
+
+        for (i, (_, icon)) in self.inventory.iter().enumerate() {
+            let (col, row) = (i % INVENTORY_COLS, i / INVENTORY_COLS);
+            let x = grid_x + col as i32 * cell;
+            let y = grid_y + row as i32 * cell;
+            fill_rect(frame, x + 1, y + 1, cell - 2, cell - 2, 0x0046_464C, 255);
+            let inset = l.px(3.0);
+            blit(
+                frame,
+                icon,
+                x + inset,
+                y + inset,
+                cell - inset * 2,
+                cell - inset * 2,
+                1.0,
+            );
+        }
+
+        let text = "Inventario: click para elegir un bloque, E para cerrar";
+        let width = self.font.width(text, l.scale);
+        self.font.draw(
+            frame,
+            (frame.width as i32 - width) / 2,
+            grid_y - pad - self.font.height(l.scale) - l.px(3.0),
+            text,
+            l.scale,
+        );
+    }
+}
+
+/// Where the hotbar is and how big a hotbar pixel is on this frame.
+struct Layout {
+    unit: f32,
+    scale: f32,
+    bar_x: i32,
+    bar_y: i32,
+    bar_w: i32,
+    bar_h: i32,
+}
+
+impl Layout {
+    fn px(&self, v: f32) -> i32 {
+        (v * self.unit * self.scale).round() as i32
     }
 }
 
 impl Slot {
-    fn frame(&self, time_of_day: f32, yaw: f32) -> &Image {
+    /// The icon to draw, or nothing at all: the block slot is empty until the
+    /// inventory fills it.
+    fn frame(&self, time_of_day: f32, yaw: f32) -> Option<&Image> {
         let n = self.frames.len();
+        if n == 0 {
+            return None;
+        }
         let index = match self.animation {
             Animation::Static => 0,
             // The pack's frame 0 is noon, and our clock has noon at 0.25.
@@ -285,7 +515,7 @@ impl Slot {
                 ((yaw / std::f32::consts::TAU).rem_euclid(1.0) * n as f32) as usize
             }
         };
-        &self.frames[index.min(n - 1)]
+        Some(&self.frames[index.min(n - 1)])
     }
 }
 
@@ -361,6 +591,29 @@ fn blit_rect(
                 alpha,
             );
         }
+    }
+}
+
+/// A flat rectangle, blended in. Used for the inventory panel and its cells.
+fn fill_rect(frame: &mut Framebuffer, x: i32, y: i32, w: i32, h: i32, color: u32, alpha: u32) {
+    let (fw, fh) = (frame.width as i32, frame.height as i32);
+    let src = [(color >> 16) as u8, (color >> 8) as u8, color as u8];
+    for dy in y.max(0)..(y + h).min(fh) {
+        for dx in x.max(0)..(x + w).min(fw) {
+            let i = (dy * fw + dx) as usize;
+            frame.pixels[i] = blend(frame.pixels[i], src, alpha);
+        }
+    }
+}
+
+/// Darken the whole frame, so an overlay on top of it reads as a screen.
+fn dim(frame: &mut Framebuffer, amount: f32) {
+    let keep = ((1.0 - amount) * 256.0) as u32;
+    for p in frame.pixels.iter_mut() {
+        let r = ((*p >> 16) & 0xff) * keep >> 8;
+        let g = ((*p >> 8) & 0xff) * keep >> 8;
+        let b = (*p & 0xff) * keep >> 8;
+        *p = (r << 16) | (g << 8) | b;
     }
 }
 
@@ -484,10 +737,15 @@ mod tests {
     #[test]
     fn every_slot_has_an_icon_and_an_action() {
         let Some(hud) = hud() else { return };
-        assert_eq!(hud.slot_count(), 7);
+        assert_eq!(hud.slot_count(), 8);
         let mut actions = Vec::new();
         for (i, slot) in hud.slots.iter().enumerate() {
-            assert!(!slot.frames.is_empty(), "slot {i} has no icon");
+            // Every slot but the block one, which is empty until the inventory
+            // hands it something.
+            assert!(
+                !slot.frames.is_empty() || slot.action == Action::Place,
+                "slot {i} has no icon"
+            );
             assert!(!slot.label.is_empty());
             actions.push(slot.action);
         }
@@ -501,6 +759,7 @@ mod tests {
                 Action::Reseed,
                 Action::Quality,
                 Action::Quit,
+                Action::Place,
             ]
         );
         // Only the two time items keep firing while the key is held.
@@ -515,8 +774,11 @@ mod tests {
         assert!(hud.label().contains("completa"), "{}", hud.label());
         hud.set_quality(3);
         assert!(hud.label().contains("1/3"), "{}", hud.label());
-        // The barrier is last, so stepping along the bar never lands on it first.
-        assert_eq!(hud.slots.last().map(|s| s.action), Some(Action::Quit));
+        // The barrier is the last of the tools: stepping along the bar never
+        // lands on it before anything else, and only the block slot follows it.
+        let quit = hud.slots.iter().position(|s| s.action == Action::Quit).unwrap();
+        assert_eq!(quit, hud.slots.len() - 2);
+        assert_eq!(hud.slots.last().map(|s| s.action), Some(Action::Place));
     }
 
     #[test]
@@ -532,28 +794,79 @@ mod tests {
     fn the_clock_and_the_compass_follow_the_time_and_the_heading() {
         let Some(hud) = hud() else { return };
         let clock = &hud.slots[1];
-        let noon = clock.frame(0.25, 0.0) as *const Image;
-        let midnight = clock.frame(0.75, 0.0) as *const Image;
+        let noon = clock.frame(0.25, 0.0).unwrap() as *const Image;
+        let midnight = clock.frame(0.75, 0.0).unwrap() as *const Image;
         assert_ne!(noon, midnight, "the clock dial should follow the hour");
-        assert_eq!(noon, clock.frame(0.25, 3.0) as *const Image, "yaw is not the clock's business");
+        assert_eq!(noon, clock.frame(0.25, 3.0).unwrap() as *const Image, "yaw is not the clock's business");
 
         let compass = &hud.slots[2];
-        let north = compass.frame(0.5, 0.0) as *const Image;
-        let south = compass.frame(0.5, std::f32::consts::PI) as *const Image;
+        let north = compass.frame(0.5, 0.0).unwrap() as *const Image;
+        let south = compass.frame(0.5, std::f32::consts::PI).unwrap() as *const Image;
         assert_ne!(north, south, "the needle should follow the camera");
     }
 
     #[test]
-    fn the_overlay_only_touches_the_bottom_of_the_frame() {
+    fn the_overlay_stays_out_of_the_picture() {
         let Some(mut hud) = hud() else { return };
         let mut frame = Framebuffer::new(640, 480);
         frame.pixels.fill(0x00336699);
         hud.draw(&mut frame, 0.3, 0.0);
 
-        let untouched = frame.pixels[..640 * 300].iter().all(|&p| p == 0x00336699);
+        // The top quarter is the sky: the hotbar and its labels live at the
+        // bottom, and the only thing in the middle is the crosshair.
+        let untouched = frame.pixels[..640 * 120].iter().all(|&p| p == 0x00336699);
         assert!(untouched, "the hud reached into the top of the frame");
         let changed = frame.pixels[640 * 400..].iter().any(|&p| p != 0x00336699);
         assert!(changed, "the hud drew nothing");
+        // Somewhere in the middle there is a crosshair; which exact pixel of it
+        // is ink depends on the pack's sprite.
+        let crosshair = (232..248)
+            .flat_map(|y| (312..328).map(move |x| y * 640 + x))
+            .any(|i| frame.pixels[i] != 0x00336699);
+        assert!(crosshair, "no crosshair in the middle");
+    }
+
+    #[test]
+    fn the_inventory_hands_a_block_to_the_hotbar() {
+        let Some(mut hud) = hud() else { return };
+        let frame = Framebuffer::new(900, 620);
+
+        // Closed, a click on the middle of the screen picks nothing.
+        assert!(hud.inventory_pick(&frame, 450.0, 300.0).is_none());
+
+        hud.toggle_inventory();
+        assert!(hud.open);
+        // The first cell of the grid is the first entry of the table.
+        let (grid_x, grid_y, cell) = hud.inventory_origin(&frame, &hud.layout(&frame));
+        let pick = hud.inventory_pick(
+            &frame,
+            (grid_x + cell / 2) as f32,
+            (grid_y + cell / 2) as f32,
+        );
+        let (block, icon) = pick.expect("the first cell should hold a block");
+        assert_eq!(block, INVENTORY[0].0);
+
+        // Choosing it fills the block slot and selects it, so the very next
+        // right click places it.
+        hud.set_held(block, icon);
+        assert_eq!(hud.held(), Some(block));
+        assert_eq!(hud.action(), Action::Place);
+        assert!(hud.label().contains(blocks::name(block)));
+
+        // Well outside the grid picks nothing.
+        assert!(hud.inventory_pick(&frame, 2.0, 2.0).is_none());
+    }
+
+    #[test]
+    fn the_inventory_dims_the_picture_behind_it() {
+        let Some(mut hud) = hud() else { return };
+        let mut frame = Framebuffer::new(640, 480);
+        frame.pixels.fill(0x00808080);
+        hud.toggle_inventory();
+        hud.draw(&mut frame, 0.3, 0.0);
+        // A corner well away from the panel: dimmed, not untouched, and not black.
+        let corner = frame.pixels[10 * 640 + 10];
+        assert!(corner < 0x00808080 && corner > 0x0010_1010, "corner is {corner:06x}");
     }
 
     #[test]
