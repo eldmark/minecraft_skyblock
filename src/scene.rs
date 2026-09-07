@@ -18,6 +18,13 @@ use crate::world::World;
 /// cycle crosses one of these steps, which keeps a smooth cycle affordable.
 const SKY_STEPS: f32 = 96.0;
 
+/// How finely the *lighting* follows the clock. Every crossing of one of these
+/// steps re-shades every pixel at full resolution, so this — not the sky bake —
+/// is what a running cycle costs. Between two steps the renderer is idle and
+/// keeps folding jittered samples into the image, which is both cheaper and
+/// cleaner than re-shading a slightly different sun sixty times a second.
+const LIGHT_STEPS: f32 = 240.0;
+
 pub struct Scene {
     /// The main island, in its own coordinates: generation and every structure
     /// still work in that box.
@@ -37,6 +44,8 @@ pub struct Scene {
     /// Which sky step is currently baked, so the bake is skipped when it would
     /// produce the same table.
     baked_step: i32,
+    /// Which lighting step the sun and the ambient are set to.
+    lit_step: i32,
     /// Threads available for re-baking the sky.
     threads: usize,
     /// Direction *towards* the sun.
@@ -72,10 +81,14 @@ impl Scene {
             },
             time_of_day: time.rem_euclid(1.0),
             cycle_running: false,
-            // A full day in half a minute: long enough to watch, short enough to
-            // demonstrate both states without waiting.
-            cycle_seconds: 30.0,
+            // A full day in two minutes. Half a minute looked good in a video
+            // and bad in the window: at that speed the light crosses a step
+            // several times a second and every one of those frames is a full
+            // re-shade, so the image never got to refine and the frame rate sat
+            // at the cost of a full frame the whole time.
+            cycle_seconds: 120.0,
             baked_step: (time.rem_euclid(1.0) * SKY_STEPS) as i32,
+            lit_step: (time.rem_euclid(1.0) * LIGHT_STEPS) as i32,
             threads,
             sun_dir: light.key_dir,
             sun_color: light.key_color,
@@ -96,13 +109,22 @@ impl Scene {
         }
         self.time_of_day = time;
 
+        // The clock reading moves continuously; the lighting moves in steps.
+        // Re-shading the whole image for a sun that has turned a thousandth of a
+        // degree is what made the running cycle expensive.
+        let step = (time * LIGHT_STEPS) as i32;
+        if step == self.lit_step {
+            return false;
+        }
+        self.lit_step = step;
+
         let light = daylight::at(time);
         self.sun_dir = light.key_dir;
         self.sun_color = light.key_color;
         self.sky_color = light.sky_color;
         self.ground_color = light.ground_color;
 
-        // The sky costs a full bake, so it only follows the clock in steps.
+        // The sky costs a full bake, so it follows the clock in coarser steps.
         let step = (time * SKY_STEPS) as i32;
         if step != self.baked_step {
             self.baked_step = step;
@@ -129,6 +151,13 @@ impl Scene {
 
     pub fn world(&self) -> &World {
         &self.world
+    }
+
+    /// Seconds a full day takes, and the seconds between two lighting updates
+    /// at that speed. Used by the status line and the tests.
+    #[cfg(test)]
+    pub fn seconds_between_light_updates(&self) -> f32 {
+        self.cycle_seconds / LIGHT_STEPS
     }
 
     pub fn reseed(&mut self, seed: u32) {
@@ -174,5 +203,59 @@ impl Scene {
         } else {
             (self.tick / 3) % frames
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    /// The pack is not committed; these tests skip when it is missing.
+    fn scene() -> Option<Scene> {
+        if !Path::new("texturepack").is_dir() {
+            return None;
+        }
+        Scene::load(2024, &Pack::open(None).ok()?, false, 0.25).ok()
+    }
+
+    #[test]
+    fn a_running_cycle_updates_the_light_a_couple_of_times_a_second() {
+        let Some(mut scene) = scene() else { return };
+        scene.cycle_running = true;
+
+        // One second of frames at 60 fps.
+        let updates = (0..60)
+            .filter(|_| scene.advance_cycle(1.0 / 60.0))
+            .count();
+        let expected = 1.0 / scene.seconds_between_light_updates();
+        assert!(
+            (updates as f32 - expected).abs() <= 1.5,
+            "{updates} light updates in a second, expected about {expected}"
+        );
+        // Every one of those frames costs a full re-shade, so a handful a second
+        // is the whole point: the rest refine the image instead.
+        assert!(updates < 6, "the cycle re-lights {updates} times a second");
+
+        // The clock itself keeps moving smoothly, whatever the light does.
+        let day = scene.time_of_day - 0.25;
+        assert!(
+            (day - 1.0 / scene.cycle_seconds).abs() < 1e-4,
+            "a second of cycle moved the clock by {day} of a day"
+        );
+    }
+
+    #[test]
+    fn a_tiny_step_moves_the_clock_without_re_lighting() {
+        let Some(mut scene) = scene() else { return };
+        let before = scene.sun_dir;
+        let changed = scene.set_time(scene.time_of_day + 1.0 / (LIGHT_STEPS * 8.0));
+        assert!(!changed, "a fraction of a step should not re-light the scene");
+        assert_ne!(scene.time_of_day, 0.25, "the clock should still have moved");
+        assert_eq!(scene.sun_dir, before);
+
+        // Crossing the step does re-light it.
+        assert!(scene.set_time(scene.time_of_day + 1.0 / LIGHT_STEPS));
+        assert_ne!(scene.sun_dir, before);
     }
 }

@@ -170,9 +170,11 @@ Optimizaciones aplicadas, cada una medida a 640×520 con 16 hilos:
 | Seguir solo la rama dominante tras la primera división | **13.52** |
 
 El ciclo de día y noche cuesta **~4.5 ms cada vez que rehornea el cielo** (medido con
-`--bench N --cycle`, que fuerza un rehorneado por frame: 18.49 → 23.0 ms). En la
-ventana el cielo solo se rehornea al cruzar uno de los 96 pasos del día, así que con
-un día de 30 s son ~3 rehorneados por segundo: cerca del 1.5% del tiempo de frame.
+`--bench N --cycle`, que fuerza un rehorneado por frame: 18.49 → 23.0 ms), pero lo caro
+no es el cielo sino **la luz**: cada cambio de iluminación re-sombrea todos los píxeles
+a resolución plena. Por eso la iluminación avanza en **240 pasos por día** y el día dura
+**2 minutos**: son ~2 re-sombreados por segundo, y los otros ~58 frames refinan la
+imagen en vez de recalcularla. El reloj sigue corriendo suave entre paso y paso.
 
 Los dos caminos interactivos cuestan bastante menos que un frame completo:
 
