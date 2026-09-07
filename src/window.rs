@@ -26,6 +26,14 @@ pub struct Input {
     pub move_axes: (f32, f32, f32),
     /// Shift (or Ctrl): move faster.
     pub boost: bool,
+    /// `1`-`9` pick a slot on the hotbar.
+    pub select_slot: Option<usize>,
+    /// Enter: use the selected item, once.
+    pub use_item: bool,
+    /// Enter held down: for the items that sweep instead of firing.
+    pub use_held: bool,
+    /// `H` hides and shows the overlay.
+    pub toggle_hud: bool,
 }
 
 impl Input {
@@ -38,6 +46,7 @@ impl Input {
             && self.time_nudge == 0.0
             && !self.toggle_free
             && self.move_axes == (0.0, 0.0, 0.0)
+            && !self.use_item
     }
 }
 
@@ -95,11 +104,13 @@ impl WindowOutput {
         if self.window.is_key_down(Key::Right) {
             input.orbit.0 += arrow_step;
         }
+        // Up looks up. The arrows are a head turning, not a hand dragging the
+        // island around, so the vertical sign is the opposite of the mouse's.
         if self.window.is_key_down(Key::Up) {
-            input.orbit.1 -= arrow_step;
+            input.orbit.1 += arrow_step;
         }
         if self.window.is_key_down(Key::Down) {
-            input.orbit.1 += arrow_step;
+            input.orbit.1 -= arrow_step;
         }
 
         if let Some((_, wheel)) = self.window.get_scroll_wheel() {
@@ -132,7 +143,29 @@ impl WindowOutput {
             input.time_nudge += 0.004;
         }
         input.screenshot = self.window.is_key_pressed(Key::P, minifb::KeyRepeat::No);
-        for (i, key) in [Key::Key1, Key::Key2, Key::Key3, Key::Key4].iter().enumerate() {
+        input.toggle_hud = self.window.is_key_pressed(Key::H, minifb::KeyRepeat::No);
+
+        // The number row picks a slot on the hotbar, as in the game; the
+        // resolution scale moved to the function keys to make room for it.
+        let slot_keys = [
+            Key::Key1,
+            Key::Key2,
+            Key::Key3,
+            Key::Key4,
+            Key::Key5,
+            Key::Key6,
+            Key::Key7,
+            Key::Key8,
+            Key::Key9,
+        ];
+        for (i, key) in slot_keys.iter().enumerate() {
+            if self.window.is_key_pressed(*key, minifb::KeyRepeat::No) {
+                input.select_slot = Some(i);
+            }
+        }
+        input.use_item = self.window.is_key_pressed(Key::Enter, minifb::KeyRepeat::No);
+        input.use_held = self.window.is_key_down(Key::Enter);
+        for (i, key) in [Key::F1, Key::F2, Key::F3, Key::F4].iter().enumerate() {
             if self.window.is_key_pressed(*key, minifb::KeyRepeat::No) {
                 input.quality = Some(i + 1);
             }

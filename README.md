@@ -7,6 +7,11 @@ cero en Rust. **Todo el cómputo corre en CPU**: sin OpenGL, sin shaders, sin GP
 ![La puerta de cristal](screenshots/gate.png)
 ![La cabeza del dragón](screenshots/dragon.png)
 
+La hotbar de Minecraft hace de menú: se elige la ranura con los números y se usa
+con `Enter`.
+
+![La hotbar como menú](screenshots/hud.png)
+
 Ciclo de día y noche — la misma escena a mediodía y a medianoche:
 
 ![Mediodía](screenshots/day.png)
@@ -29,11 +34,11 @@ cargo run --release -- --bench 30                # medición de ms/frame
 cargo run --release -- --bench-idle 60           # medición del frame en reposo
 cargo run --release -- --bench-move 60           # medición del frame mientras se arrastra
 cargo run --release -- --check-pack              # verifica la carga del texture pack
-cargo test --release                             # 112 pruebas
+cargo test --release                             # 121 pruebas
 ```
 
 Opciones: `--width W --height H --seed N --threads N --samples N --sky-panorama
---time T --cycle --eye X,Y,Z --look YAW,PITCH`.
+--time T --cycle --eye X,Y,Z --look YAW,PITCH --hud`.
 
 `--eye` y `--look` plantan la cámara libre en un punto concreto para el render
 offline, útil para capturas desde dentro de la escena o desde debajo de la isla.
@@ -46,19 +51,34 @@ que es como se arma el video del ciclo.
 
 | Tecla / acción | Efecto |
 |---|---|
-| Flechas, arrastrar mouse | Girar la cámara |
+| Flechas | Girar la cámara (arriba mira hacia arriba) |
+| Arrastrar mouse | Girar la cámara arrastrando la escena |
 | `W` / `S` | Acercar-alejar (órbita) · avanzar-retroceder (vuelo) |
 | `A` / `D` | Girar alrededor de la isla (órbita) · desplazarse a los lados (vuelo) |
 | `Q` / `E` | Bajar / subir (vuelo) |
 | `Shift` | Moverse más rápido |
 | Scroll | Acercar / alejar |
-| `F` | Alternar entre **órbita** y **vuelo libre** |
+| `1`–`6` | Elegir ranura de la hotbar |
+| `Enter` | Usar el objeto elegido (mantener, en el reloj y la brújula) |
 | `Espacio` | Arrancar / detener el **ciclo de día y noche** |
+| `F` | Alternar entre **órbita** y **vuelo libre** |
+| `H` | Mostrar u ocultar la hotbar |
 | `,` / `.` | Mover la hora a mano |
 | `R` | Regenerar el terreno con otra semilla |
-| `1`–`4` | Escala de resolución |
+| `F1`–`F4` | Escala de resolución |
 | `P` | Captura de pantalla a PNG |
 | `Esc` | Salir |
+
+La hotbar es el menú, y cada objeto es su acción:
+
+| Ranura | Objeto | Qué hace |
+|---|---|---|
+| 1 | Pico de diamante | Cambia entre órbita y vuelo libre |
+| 2 | Reloj | Mantener `Enter`: adelanta la hora (la esfera sigue al sol) |
+| 3 | Brújula | Mantener `Enter`: regresa la hora (la aguja sigue a la cámara) |
+| 4 | Cuadro | Guarda una captura PNG |
+| 5 | Semillas | Genera otro terreno |
+| 6 | Barrera | Salir |
 
 Mientras la cámara se mueve se traza **medio frame en tablero de ajedrez a resolución
 completa** y el resto conserva el color anterior: mismo costo que media resolución, sin
@@ -152,6 +172,7 @@ src/
   main.rs        modos: ventana, render offline, benchmark, verificación del pack
   output.rs      trait Output: ventana o PNGs; el renderer no sabe cuál
   window.rs      único módulo que toca minifb
+  hud.rs         hotbar, iconos y tipografía del pack, compuestos sobre el frame
   math.rs        Vec3, reflect, refract (Snell + TIR), Fresnel, gamma
   inflate.rs     DEFLATE (stored, Huffman fijo y dinámico) + zlib
   png.rs         encoder y decoder PNG propios

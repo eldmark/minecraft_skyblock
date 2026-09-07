@@ -9,6 +9,7 @@ mod assets;
 mod blocks;
 mod camera;
 mod daylight;
+mod hud;
 mod inflate;
 mod noise;
 mod material;
@@ -68,6 +69,8 @@ struct Args {
     time: f32,
     /// Offline: sweep a full day across the rendered frames.
     cycle: bool,
+    /// Offline: draw the hotbar overlay on the rendered frames too.
+    hud: bool,
     /// Offline: render from this free-flight eye instead of orbiting.
     eye: Option<Vec3>,
     /// Yaw and pitch, in radians, for `--eye`.
@@ -78,6 +81,7 @@ impl Args {
     fn parse() -> Args {
         let mut args = Args {
             mode: Mode::Window,
+            hud: false,
             width: 900,
             height: 600,
             frames: 240,
@@ -94,6 +98,7 @@ impl Args {
         while let Some(arg) = argv.next() {
             match arg.as_str() {
                 "--window" => args.mode = Mode::Window,
+                "--hud" => args.hud = true,
                 "--render" => {
                     let dir = argv.next().unwrap_or_else(|| "out".into());
                     args.mode = Mode::Render { dir: dir.into() };
@@ -205,6 +210,7 @@ usage: skyblock [--window | --render DIR | --bench N] [--frames N] [--width W] [
   --samples N      jittered samples per offline frame (antialiasing)
   --time T         time of day in [0,1): 0 sunrise, .25 noon, .5 sunset, .75 night
   --cycle          offline: sweep a full day/night cycle across the frames
+  --hud            offline: composite the hotbar overlay onto the frames
   --eye X,Y,Z      offline: render from this point instead of orbiting
   --look YAW,PITCH radians, for --eye (default 0.9,0.2)
   --check-pack     decode textures from the resource pack and report findings
@@ -250,6 +256,12 @@ fn run_headless(mut out: Box<dyn Output>, args: &Args, report: bool) -> io::Resu
     if let Some(threads) = args.threads {
         renderer.threads = threads;
     }
+    // Offline the overlay can go straight onto the frame: nothing reads it back.
+    let mut overlay = match args.hud {
+        true => Some(hud::Hud::load(&pack::Pack::open(None).map_err(io::Error::other)?)
+            .map_err(io::Error::other)?),
+        false => None,
+    };
 
     let start = Instant::now();
     let mut rendered = 0usize;
@@ -274,6 +286,9 @@ fn run_headless(mut out: Box<dyn Output>, args: &Args, report: bool) -> io::Resu
         }
         scene.tick += 1;
         rendered += 1;
+        if let Some(hud) = overlay.as_mut() {
+            hud.draw(&mut frame, scene.time_of_day, camera.yaw);
+        }
         if !out.present(&frame)? {
             break;
         }
@@ -364,6 +379,14 @@ tracing {:.0}% of the pixels",
 
 fn run_window(args: &Args) -> io::Result<()> {
     let mut scene = load_scene(args.seed, args.panorama_sky, args.time)?;
+    // The overlay reads its own sprites out of the same pack the scene uses.
+    let mut hud = hud::Hud::load(&pack::Pack::open(None).map_err(io::Error::other)?)
+        .map_err(io::Error::other)?;
+    let mut hud_visible = true;
+    // The overlay is composited into a copy: the renderer keeps re-using the
+    // frame it wrote, and painting a hotbar into it would poison the running
+    // average and the pixels the refinement pass skips.
+    let mut presented = Framebuffer::new(args.width, args.height);
     let mut camera = scene_camera(scene.world());
     let mut win = WindowOutput::new("Skyblock Diorama", args.width, args.height)?;
     let mut frame = Framebuffer::new(args.width, args.height);
@@ -378,7 +401,38 @@ fn run_window(args: &Args) -> io::Result<()> {
     while win.is_open() {
         let frame_start = Instant::now();
         let input = win.poll_input();
-        if input.toggle_free {
+
+        // The hotbar is the menu: a slot is chosen with the number row and used
+        // with Enter, and the two time items keep working while it is held.
+        if let Some(slot) = input.select_slot {
+            if slot < hud.slot_count() {
+                hud.select(slot);
+                println!("hotbar {}: {}", slot + 1, hud.label());
+            }
+        }
+        if input.toggle_hud {
+            hud_visible = !hud_visible;
+        }
+        let mut fired = None;
+        if input.use_item || (input.use_held && hud.action().repeats()) {
+            fired = Some(hud.action());
+        }
+
+        let mut toggle_camera = input.toggle_free;
+        let mut want_screenshot = input.screenshot;
+        let mut want_reseed = input.reseed;
+        let mut item_nudge = 0.0;
+        match fired {
+            Some(hud::Action::ToggleCamera) => toggle_camera = true,
+            Some(hud::Action::TimeForward) => item_nudge = 0.004,
+            Some(hud::Action::TimeBack) => item_nudge = -0.004,
+            Some(hud::Action::Screenshot) => want_screenshot = true,
+            Some(hud::Action::Reseed) => want_reseed = true,
+            Some(hud::Action::Quit) => break,
+            None => {}
+        }
+
+        if toggle_camera {
             let next = match camera.mode {
                 CameraMode::Orbit => CameraMode::Free,
                 CameraMode::Free => CameraMode::Orbit,
@@ -413,18 +467,20 @@ fn run_window(args: &Args) -> io::Result<()> {
             );
         }
         let mut time_changed = false;
-        if input.time_nudge != 0.0 {
-            time_changed |= scene.set_time(scene.time_of_day + input.time_nudge);
+        let nudge = input.time_nudge + item_nudge;
+        if nudge != 0.0 {
+            time_changed |= scene.set_time(scene.time_of_day + nudge);
         }
         time_changed |= scene.advance_cycle(last_frame_seconds);
 
-        if input.reseed {
+        if want_reseed {
             let seed = scene
                 .island
                 .seed
                 .wrapping_mul(1664525)
                 .wrapping_add(1013904223);
             scene.reseed(seed);
+            hud.say(format!("semilla {seed}"));
             println!("regenerated terrain with seed {seed}");
         }
         if let Some(q) = input.quality {
@@ -442,11 +498,11 @@ fn run_window(args: &Args) -> io::Result<()> {
         if time_changed {
             renderer.mark_all_active();
         }
-        let moving = !input.is_idle() || resized || input.reseed;
+        let moving = !input.is_idle() || resized || want_reseed;
         if moving {
             // Full resolution, a quarter of the pixels per frame, the rest kept
             // from the frame before. Sharper than stretching a half-size image.
-            if resized || input.reseed {
+            if resized || want_reseed {
                 renderer.invalidate_moving();
             }
             renderer.scale = quality;
@@ -462,9 +518,11 @@ fn run_window(args: &Args) -> io::Result<()> {
             scene.tick += 1;
         }
 
-        if input.screenshot {
+        // The screenshot is of the render, without the overlay on top of it.
+        if want_screenshot {
             let path = PathBuf::from(format!("screenshot_{shots:03}.png"));
             frame.save_png(&path)?;
+            hud.say(format!("{}", path.display()));
             println!("wrote {}", path.display());
             shots += 1;
         }
@@ -472,7 +530,7 @@ fn run_window(args: &Args) -> io::Result<()> {
         let ms = frame_start.elapsed().as_secs_f64() * 1000.0;
         last_frame_seconds = (ms / 1000.0) as f32;
         win.set_status(&format!(
-            "{ms:.1} ms  {:.0} fps  {w}x{h}  {} threads  {} spp  {}  {} {}",
+            "{ms:.1} ms  {:.0} fps  {w}x{h}  {} threads  {} spp  {}  {} {}  [{}]",
             1000.0 / ms.max(0.001),
             renderer.threads,
             renderer.samples.max(1),
@@ -481,9 +539,22 @@ fn run_window(args: &Args) -> io::Result<()> {
                 CameraMode::Free => "free flight (F: orbit)",
             },
             scene.clock(),
-            if scene.cycle_running { "(D: running)" } else { "(D: paused)" }
+            if scene.cycle_running {
+                "(space: running)"
+            } else {
+                "(space: paused)"
+            },
+            hud.label()
         ));
-        if !win.present(&frame)? {
+        let shown = if hud_visible {
+            presented.resize(frame.width, frame.height);
+            presented.pixels.copy_from_slice(&frame.pixels);
+            hud.draw(&mut presented, scene.time_of_day, camera.yaw);
+            &presented
+        } else {
+            &frame
+        };
+        if !win.present(shown)? {
             break;
         }
     }

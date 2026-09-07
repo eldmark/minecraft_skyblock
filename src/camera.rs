@@ -263,6 +263,21 @@ mod tests {
     }
 
     #[test]
+    fn a_positive_pitch_delta_raises_the_view() {
+        // The window maps the up arrow to a positive vertical delta, so this is
+        // what makes "up" look up rather than tipping the camera over the island.
+        let mut c = cam();
+        let before = c.forward().y;
+        c.apply((0.0, 6.0), 0.0);
+        assert!(c.forward().y > before, "the view should tilt upwards");
+
+        c.set_mode(Mode::Free);
+        let before = c.forward().y;
+        c.look((0.0, 6.0));
+        assert!(c.forward().y > before, "free flight should agree with the orbit");
+    }
+
+    #[test]
     fn looking_around_clamps_the_pitch() {
         let mut c = cam();
         c.set_mode(Mode::Free);
