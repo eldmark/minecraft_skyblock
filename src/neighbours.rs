@@ -189,26 +189,44 @@ fn nether_island(world: &mut World, noise: &Noise, ground: &Surface) {
         }
     }
 
-    // The platform, and the portal standing on it: obsidian frame, four by five,
-    // with the portal plane inside it.
+    // The platform and the portal: a wide brick terrace edged in magma, an
+    // obsidian frame six by eight with crying obsidian worked into it, and lamps
+    // on four corner pillars. It is the tallest thing on the island on purpose —
+    // from the main island it is what says "there is something over there".
     let (px, pz) = (cx + 1, cz - 1);
-    for z in pz - 2..=pz + 2 {
-        for x in px - 3..=px + 3 {
-            world.set(x, base, z, NETHER_BRICKS);
+    for z in pz - 3..=pz + 3 {
+        for x in px - 4..=px + 4 {
+            let edge = x == px - 4 || x == px + 4 || z == pz - 3 || z == pz + 3;
+            world.set(x, base, z, if edge { MAGMA } else { NETHER_BRICKS });
         }
     }
-    for x in px - 2..=px + 1 {
+    // Frame: sill and lintel, and two jambs eight blocks tall.
+    for x in px - 2..=px + 2 {
         world.set(x, base + 1, pz, OBSIDIAN);
-        world.set(x, base + 5, pz, OBSIDIAN);
+        world.set(x, base + 8, pz, if x == px { CRYING_OBSIDIAN } else { OBSIDIAN });
     }
-    for y in base + 1..=base + 5 {
-        world.set(px - 3, y, pz, OBSIDIAN);
-        world.set(px + 2, y, pz, OBSIDIAN);
+    for y in base + 1..=base + 8 {
+        for x in [px - 3, px + 3] {
+            // A course of crying obsidian halfway up each jamb.
+            let block = if y == base + 4 { CRYING_OBSIDIAN } else { OBSIDIAN };
+            world.set(x, y, pz, block);
+        }
     }
-    for y in base + 2..=base + 4 {
-        for x in px - 2..=px + 1 {
+    for y in base + 2..=base + 7 {
+        for x in px - 2..=px + 2 {
             world.set(x, y, pz, NETHER_PORTAL);
         }
+    }
+    // Corner pillars with a lamp on top, and a step up to the threshold.
+    for (dx, dz) in [(-4i32, -3i32), (4, -3), (-4, 3), (4, 3)] {
+        for y in base + 1..=base + 3 {
+            world.set(px + dx, y, pz + dz, NETHER_BRICKS);
+        }
+        world.set(px + dx, base + 4, pz + dz, GLOWSTONE);
+    }
+    for x in px - 3..=px + 3 {
+        world.set(x, base + 1, pz + 2, NETHER_BRICKS);
+        world.set(x, base + 1, pz - 2, NETHER_BRICKS);
     }
 
     // A patch of soul sand by the pool, and an arch of nether brick that the
@@ -317,7 +335,10 @@ fn house(world: &mut World, at: (i32, i32, i32)) {
 
     for z in cz - d..=cz + d {
         for x in cx - w..=cx + w {
-            world.set(x, base, z, OAK_PLANKS);
+            // The middle of the floor is glowstone: it lights the room, and a
+            // window is only readable from an angle if what is behind it is lit.
+            let lit = (x - cx).abs() <= 1 && (z - cz).abs() <= 1;
+            world.set(x, base, z, if lit { GLOWSTONE } else { OAK_PLANKS });
         }
     }
 
@@ -331,9 +352,12 @@ fn house(world: &mut World, at: (i32, i32, i32)) {
                 let corner = (x == cx - w || x == cx + w) && (z == cz - d || z == cz + d);
                 // The doorway faces west, towards the bridge and the main island.
                 let door = x == cx - w && z == cz && y < floor + 2;
+                // Two windows a side, at head height, on every wall but the front.
                 let window = !corner
                     && y == floor + 1
-                    && ((x == cx + w && z == cz) || (z == cz - d && x == cx) || (z == cz + d && x == cx));
+                    && ((x == cx + w && (z == cz - 1 || z == cz + 1))
+                        || (z == cz - d && (x == cx - 1 || x == cx + 1))
+                        || (z == cz + d && (x == cx - 1 || x == cx + 1)));
                 let block = if door {
                     AIR
                 } else if corner {
@@ -344,25 +368,47 @@ fn house(world: &mut World, at: (i32, i32, i32)) {
                     OAK_PLANKS
                 };
                 world.set(x, y, z, block);
+                if window {
+                    // A lamp right behind the pane. Ozocraft's glass is a dark
+                    // frame around a transparent middle, so a window onto an
+                    // unlit room reads as a hole punched in the wall; backed by
+                    // light it reads as a window, and the house has something to
+                    // show after dark.
+                    // Straight in through the pane, along the wall's own normal:
+                    // set diagonally it lights the room but not the window.
+                    let (ix, iz) = if x == cx - w || x == cx + w {
+                        ((cx - x).signum(), 0)
+                    } else {
+                        (0, (cz - z).signum())
+                    };
+                    world.set(x + ix, y, z + iz, GLOWSTONE);
+                }
             }
         }
     }
 
-    // Roof: two courses of slabs stepping in, then a ridge beam.
+    // Roof: solid courses of planks stepping in to a log ridge, with a slab eave
+    // hanging off the bottom course. Slabs alone read as shelves, not as a roof.
+    for z in cz - d - 1..=cz + d + 1 {
+        for x in cx - w - 1..=cx + w + 1 {
+            world.set(x, floor + 3, z, OAK_SLAB);
+        }
+    }
     for (step, y) in (floor + 3..floor + 5).enumerate() {
         let inset = step as i32;
         for z in cz - d + inset..=cz + d - inset {
-            for x in cx - w - 1 + inset..=cx + w + 1 - inset {
-                world.set(x, y, z, OAK_SLAB);
+            for x in cx - w..=cx + w {
+                world.set(x, y, z, OAK_PLANKS);
             }
         }
     }
     for x in cx - w..=cx + w {
-        world.set(x, floor + 5, cz, OAK_SLAB);
+        world.set(x, floor + 5, cz, OAK_LOG);
     }
 
     // A lantern by the door, so the farm reads at night too.
     world.set(cx - w - 1, floor + 1, cz - 1, GLOWSTONE);
+
 }
 
 /// A watered field: farmland around a channel, wheat on top of it.
@@ -379,7 +425,7 @@ fn field(world: &mut World, at: (i32, i32, i32)) {
             // Every third row is left bare, so the plot reads as rows of crops
             // rather than one green mat.
             if (z - cz).rem_euclid(3) != 0 {
-                world.set(x, base + 1, z, WHEAT);
+                world.set(x, base + 1, z, PUMPKIN);
             }
         }
     }
@@ -584,7 +630,7 @@ mod tests {
             );
             assert!(count(&world, NETHER_PORTAL) >= 12, "seed {seed}: no portal");
             assert!(count(&world, LAVA) >= 8, "seed {seed}: no lava");
-            assert!(count(&world, WHEAT) >= 20, "seed {seed}: no crops");
+            assert!(count(&world, PUMPKIN) >= 20, "seed {seed}: no crops");
             assert!(count(&world, HAY_BLOCK) >= 8, "seed {seed}: no hay");
             assert!(count(&world, OAK_FENCE) >= 40, "seed {seed}: no fences");
             assert!(count(&world, OAK_SLAB) >= 40, "seed {seed}: no slabs");
@@ -629,3 +675,5 @@ mod tests {
         }
     }
 }
+
+

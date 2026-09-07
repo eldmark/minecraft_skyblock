@@ -50,14 +50,17 @@ pub const LAVA: Block = 43;
 pub const NETHER_PORTAL: Block = 44;
 pub const HAY_BLOCK: Block = 45;
 pub const FARMLAND: Block = 46;
-pub const WHEAT: Block = 47;
+pub const PUMPKIN: Block = 47;
 pub const BROWN_WOOL: Block = 48;
 
 pub const COUNT: usize = 49;
 
 /// Blocks that emit light of their own.
 pub fn is_emissive(block: Block) -> bool {
-    matches!(block, GLOWSTONE | PORTAL | LAVA | MAGMA | NETHER_PORTAL)
+    // Magma is deliberately absent: it covers the whole underside of the nether
+    // island, and as a light source it added forty clusters that every shaded
+    // point had to walk past. Its material still glows, which is all it is for.
+    matches!(block, GLOWSTONE | PORTAL | LAVA | NETHER_PORTAL)
 }
 
 /// How much of its cell a block fills. Everything is a full cube unless it is
@@ -67,7 +70,6 @@ pub fn shape(block: Block) -> crate::world::Shape {
     match block {
         OAK_SLAB => Shape::Slab,
         OAK_FENCE => Shape::Fence,
-        WHEAT => Shape::Crop,
         _ => Shape::Full,
     }
 }
@@ -123,7 +125,7 @@ pub fn name(block: Block) -> &'static str {
         NETHER_PORTAL => "nether_portal",
         HAY_BLOCK => "hay_block",
         FARMLAND => "farmland",
-        WHEAT => "wheat",
+        PUMPKIN => "pumpkin",
         BROWN_WOOL => "brown_wool",
         _ => "unknown",
     }

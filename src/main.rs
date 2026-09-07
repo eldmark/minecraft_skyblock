@@ -508,13 +508,24 @@ fn run_window(args: &Args) -> io::Result<()> {
         }
         let moving = !input.is_idle() || resized || want_reseed;
         if moving {
-            // Full resolution, a quarter of the pixels per frame, the rest kept
-            // from the frame before. Sharper than stretching a half-size image.
             if resized || want_reseed {
                 renderer.invalidate_moving();
             }
-            renderer.scale = quality;
-            renderer.render_moving(&mut frame, &scene, &camera);
+            // Two ways to keep a drag responsive, picked by what the last frame
+            // actually cost. Normally: full resolution, half the pixels traced in
+            // a checkerboard, the other half interpolated from their neighbours.
+            // When a frame is already over ~22 fps of work — a big window, or a
+            // heavy view — that is not enough, so the frame drops to half
+            // resolution instead. Blocky beats unresponsive, and it lasts only as
+            // long as the camera is moving.
+            if last_frame_seconds > 0.045 {
+                renderer.scale = quality.max(2);
+                renderer.render(&mut frame, &scene, &camera);
+                renderer.invalidate_moving();
+            } else {
+                renderer.scale = quality;
+                renderer.render_moving(&mut frame, &scene, &camera);
+            }
             renderer.reset_accumulation();
             scene.tick += 1;
         } else {

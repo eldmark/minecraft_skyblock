@@ -472,14 +472,14 @@ impl Assets {
                 Material::diffuse(3.0),
             ),
             (
-                // The crop is drawn from a texture with holes in it, on a box
-                // inset from the cell: the alpha does the shape the geometry does
-                // not.
-                blocks::WHEAT,
-                "wheat_stage7",
-                "wheat_stage7",
-                "wheat_stage7",
-                Material::diffuse(1.5),
+                // Pumpkins are the farm's crop: a solid block reads at diorama
+                // distance, and wheat — a texture of thin stalks with holes in it
+                // — did not, besides paying for an alpha skip on every ray.
+                blocks::PUMPKIN,
+                "pumpkin_top",
+                "pumpkin_side",
+                "pumpkin_top",
+                Material::diffuse(2.5),
             ),
             (
                 blocks::BROWN_WOOL,

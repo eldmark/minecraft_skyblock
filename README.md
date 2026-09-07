@@ -87,8 +87,11 @@ La hotbar es el menú, y cada objeto es su acción:
 | 7 | Barrera | Salir |
 
 Mientras la cámara se mueve se traza **medio frame en tablero de ajedrez a resolución
-completa** y el resto conserva el color anterior: mismo costo que media resolución, sin
-los bordes escalonados. Al soltarla se **acumulan muestras jittereadas** hasta
+completa** y la otra mitad se **interpola de sus dos vecinos de ese mismo frame**:
+mismo costo que media resolución, sin bordes escalonados y sin arrastre —conservar el
+píxel del frame anterior se veía como desenfoque de movimiento—. Si aun así un frame
+pasa de 45 ms (una ventana grande), el arrastre baja a media resolución hasta que la
+cámara se detiene. Al soltarla se **acumulan muestras jittereadas** hasta
 converger, que es de donde sale el antialiasing; ya convergida solo se re-trazan los
 píxeles que siguen cambiando —el agua, el portal y sus reflejos—.
 
@@ -140,7 +143,7 @@ barandas de cercas y postes colgando al vacío:
   magma brillando por el envés de la isla, un arco roto de ladrillo del Nether y un
   **portal al Nether** de obsidiana, transparente, refractante y encendido.
 - **Granja** (este): casa de tablones con esquinas de tronco, ventanas de vidrio y
-  techo de *slabs*; un campo de **trigo** en surcos sobre tierra de labor regada por
+  techo de *slabs*; un campo de **calabazas** en surcos sobre tierra de labor regada por
   un canal; pilas de **heno**; y un corral de cercas con una vaca y dos ovejas
   construidas con bloques.
 
@@ -175,9 +178,10 @@ Los dos caminos interactivos cuestan bastante menos que un frame completo:
 
 | Camino (900×600, 16 hilos) | ms/frame | píxeles trazados |
 |---|---|---|
-| Frame completo | 27.7 | 100% |
-| Arrastrando (tablero) | **14.6** (69 fps) | 50% |
-| En reposo (refresco selectivo) | **16.0** | 49% |
+| Frame completo | 29.6 | 100% |
+| Arrastrando (tablero + interpolación) | **17.2** (58 fps) | 50% |
+| Arrastrando, si el frame pasa de 45 ms | media resolución | 25% |
+| En reposo (refresco selectivo) | **17.7** | 48% |
 
 Un cambio de hora no reinicia nada: marca todos los píxeles como activos y re-sombrea
 a resolución plena sobre la imagen que ya había, así el ciclo se ve como un fundido.
