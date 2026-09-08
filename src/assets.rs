@@ -578,9 +578,6 @@ mod tests {
     /// The pack is not committed, so these tests skip rather than fail when it is
     /// absent (see README for where to put it).
     fn pack() -> Option<Pack> {
-        if !Path::new("texturepack").is_dir() {
-            return None;
-        }
         Pack::open(None).ok()
     }
 

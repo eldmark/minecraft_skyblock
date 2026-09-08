@@ -48,7 +48,7 @@ cargo run --release -- --bench 30                # medición de ms/frame
 cargo run --release -- --bench-idle 60           # medición del frame en reposo
 cargo run --release -- --bench-move 60           # medición del frame mientras se arrastra
 cargo run --release -- --check-pack              # verifica la carga del texture pack
-cargo test --release                             # 140 pruebas
+cargo test --release                             # 142 pruebas
 ```
 
 Opciones: `--width W --height H --seed N --threads N --samples N --sky-panorama
@@ -110,16 +110,30 @@ cámara se detiene. Al soltarla se **acumulan muestras jittereadas** hasta
 converger, que es de donde sale el antialiasing; ya convergida solo se re-trazan los
 píxeles que siguen cambiando —el agua, el portal y sus reflejos—.
 
-## Texture pack
+## Texturas
 
-La escena usa **Ozocraft Remix** (32×32). El pack no se incluye en el repositorio por
-tamaño y licencia. Para ejecutarlo, colocar el `.zip` del pack en:
+Las **92 texturas que el programa realmente usa** están en `textures/`, con la misma
+estructura que el pack menos el prefijo `assets/minecraft/textures/`:
+
+```
+textures/block/…   45 bloques
+textures/item/…    reloj (16 fotogramas), brújula (8), pico, cuadro, semillas,
+                   telescopio, barrera
+textures/gui/…     hotbar, selección, cruz, y las seis caras del panorama
+textures/font/…    ascii.png, la tipografía del HUD
+```
+
+Con eso el repositorio se clona y se ejecuta **sin descargar nada**. El programa
+prefiere esa carpeta; si no está, busca el `.zip` del pack en `texturepack/` y lo lee
+directo con su propio inflate:
 
 ```
 texturepack/Ozocraft Remix 1.21+ [R17].zip
 ```
 
-El programa lee las texturas directamente del ZIP con su propio DEFLATE.
+Las texturas son de **Ozocraft Remix** (32×32) y se incluyen solo las necesarias para
+reproducir este trabajo académico; el pack completo (51 MB) sigue fuera del
+repositorio.
 
 ## Qué implementa
 
@@ -220,7 +234,7 @@ src/
   png.rs         encoder y decoder PNG propios
   zip.rs         lector del texture pack
   texture.rs     texturas en luz lineal, animación y normales por Sobel
-  pack.rs        acceso al pack
+  pack.rs        acceso a las texturas: carpeta extraida o el .zip del pack
   blocks.rs      ids de bloque
   material.rs    parámetros ópticos por material
   assets.rs      bloque → textura por cara → material

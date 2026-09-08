@@ -717,11 +717,9 @@ mod tests {
     use crate::pack::Pack;
     use std::path::Path;
 
-    /// The pack is not committed, so these tests skip when it is absent.
+    /// These tests skip when neither the extracted textures nor the pack are
+    /// there to load.
     fn scene() -> Option<Scene> {
-        if !Path::new("texturepack").is_dir() {
-            return None;
-        }
         Scene::load(2024, &Pack::open(None).ok()?, false, 0.16).ok()
     }
 

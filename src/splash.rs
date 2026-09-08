@@ -266,7 +266,7 @@ mod tests {
     use super::*;
 
     fn splash() -> Option<Splash> {
-        if !Path::new("texturepack").is_dir() || !Path::new(BACKGROUND).is_file() {
+        if !Path::new(BACKGROUND).is_file() {
             return None;
         }
         Some(Splash::load(&Pack::open(None).ok()?).expect("the title screen should load"))

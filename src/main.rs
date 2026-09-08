@@ -803,10 +803,7 @@ mod scene_tests {
 
     #[test]
     fn a_click_breaks_the_block_it_lands_on_and_puts_one_back_on_its_face() {
-        let Some(pack) = (Path::new("texturepack").is_dir())
-            .then(|| pack::Pack::open(None).ok())
-            .flatten()
-        else {
+        let Ok(pack) = pack::Pack::open(None) else {
             return;
         };
         let mut scene = Scene::load(2024, &pack, false, 0.25).unwrap();

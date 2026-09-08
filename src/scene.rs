@@ -223,9 +223,6 @@ mod tests {
 
     /// The pack is not committed; these tests skip when it is missing.
     fn scene() -> Option<Scene> {
-        if !Path::new("texturepack").is_dir() {
-            return None;
-        }
         Scene::load(2024, &Pack::open(None).ok()?, false, 0.25).ok()
     }
 

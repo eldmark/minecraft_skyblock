@@ -728,9 +728,6 @@ mod tests {
 
     /// The pack is not committed; these tests skip when it is missing.
     fn hud() -> Option<Hud> {
-        if !Path::new("texturepack").is_dir() {
-            return None;
-        }
         Some(Hud::load(&Pack::open(None).ok()?).expect("the hud should load from the pack"))
     }
 
