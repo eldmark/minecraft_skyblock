@@ -153,6 +153,219 @@ repositorio.
 | Ciclo día/noche | `daylight.rs` — sol, luna, paleta del cielo y ambiente desde un solo número; tecla `Q` |
 | Paralelismo y optimización | `parallel.rs`, tabla de mediciones abajo |
 
+## Arquitectura
+
+El proyecto está escrito en capas con dependencias en una sola dirección: nada de lo
+que está abajo sabe de lo que está arriba.
+
+```
+  main.rs ──► window.rs ──► minifb          (única dependencia externa)
+     │   └──► splash.rs, hud.rs             (interfaz compuesta a mano)
+     ▼
+  render.rs ──► camera.rs
+     │
+     └──► scene.rs ──┬──► world.rs   ◄── terrain.rs ─┐
+                     │                  structures.rs├──► noise.rs
+                     │                  neighbours.rs┘
+                     ├──► assets.rs ──┬──► texture.rs ──► pack.rs ──► zip.rs
+                     │                └──► material.rs                 │
+                     ├──► skybox.rs                                    ▼
+                     └──► daylight.rs                    png.rs ──► inflate.rs
+
+  transversales: math.rs (Vec3, Fresnel, Snell), parallel.rs (cola de tiras),
+                 output.rs (trait Output: ventana o PNG)
+```
+
+Las tres piezas centrales:
+
+- **`world.rs`** es la única representación de la escena: una cuadrícula densa de
+  128×60×64 celdas, un byte por celda con el id del bloque (490 k celdas, 490 KB). No sabe qué es un templo ni un dragón.
+  Expone una sola operación, `trace(ray, max_t, accept) -> Option<Hit>`; **todo** lo
+  demás —cámara, sombras, reflexiones, refracciones, y hasta el click del mouse—
+  consume solo eso.
+- **`scene.rs`** junta el mundo con los materiales, la iluminación del momento y el
+  reloj de animación. Es lo que `render.rs` recibe: un objeto inmutable durante el
+  frame, que por eso se puede compartir entre todos los hilos sin candados.
+- **`render.rs`** no sabe a dónde va la imagen. Escribe en un `Framebuffer` y quien
+  lo presenta es un `Output`: la ventana o un PNG. Por eso el mismo motor entrega el
+  render offline sin abrir ventana.
+
+La generación también está en capas: `terrain.rs` construye la isla principal en su
+propia caja de 48×48, `structures.rs` le pone los edificios en esas mismas
+coordenadas, y `neighbours.rs` estampa el resultado en el mundo grande y hace crecer
+las dos islas vecinas alrededor. Ninguna de las dos primeras sabe que existe un mundo
+más ancho.
+
+## Cómo se traza un rayo
+
+### El rayo de la cámara
+
+Un rayo por píxel, generado a partir de la base ortonormal de la cámara:
+
+```rust
+let half_h = (fov_y * 0.5).tan();
+let half_w = half_h * aspect;
+let sx =  ((x + jitter.0) / width  * 2.0 - 1.0) * half_w;
+let sy = -((y + jitter.1) / height * 2.0 - 1.0) * half_h;   // y de pantalla crece hacia abajo
+Ray::new(eye, forward + right * sx + up * sy)
+```
+
+El `jitter` es lo que convierte el mismo código en antialiasing: con `(0.5, 0.5)` el
+rayo pasa por el centro del píxel; con un desplazamiento distinto cada frame, el
+promedio de varios frames es una imagen suavizada.
+
+### El recorrido: DDA sobre la cuadrícula
+
+Como toda la escena son cubos alineados a una cuadrícula entera, no hace falta un
+BVH ni probar intersecciones contra triángulos. Se usa el **DDA 3D de
+Amanatides–Woo**: el rayo camina de celda en celda, y cada paso cuesta una
+comparación y dos sumas.
+
+1. **Entrada**: se corta el rayo contra la caja del mundo (`box_range`) para saber
+   entre qué distancias vale la pena caminar. Si no la toca, es cielo.
+2. **Preparación**: por cada eje se calcula `step` (±1), `t_max` (distancia hasta el
+   próximo borde de celda) y `t_delta` (distancia entre bordes, `1/|dir|`).
+3. **Paso**: se avanza por el eje cuyo `t_max` es menor, se actualizan `voxel` y
+   `t_max`, y la cara golpeada sale del eje y el signo del paso —sin calcular
+   intersecciones.
+
+```rust
+let axis = argmin(t_max);          // el borde más cercano
+t = t_max[axis];
+voxel[axis] += step[axis];
+t_max[axis] += t_delta[axis];
+face = Face::from_axis(axis, step[axis] > 0);
+```
+
+Sobre eso, dos cosas:
+
+- **Macro-cuadrícula de ocupación** de 4×4×4: un booleano por macro-celda que dice
+  si contiene algo. Evita leer el arreglo de bloques en el aire, que es la mayor parte
+  del mundo. *(Saltar la macro-celda entera en vez de recorrerla se implementó dos
+  veces y se midió más lento las dos; está documentado abajo.)*
+- **Bloques parciales**. Slabs y cercas no llenan su celda. Cuando el DDA entra en
+  una de ellas, resuelve un test rayo/caja **dentro** de la celda, entre la `t` de
+  entrada y la de salida; si falla, el rayo sencillamente sigue. Las cercas arman sus
+  cajas al vuelo —poste central más travesaños hacia cada vecino sólido—, que es lo
+  que hace que una fila se lea como baranda.
+
+El resultado es un `Hit { t, block, face, normal, u, v, voxel, point }`. Las `u, v`
+salen de la parte fraccionaria del punto sobre la cara, así que texturar es una
+resta y una multiplicación.
+
+### Un solo trazador para todo
+
+`trace` recibe un predicado `accept`, y eso basta para servir a todos los tipos de
+rayo sin duplicar el recorrido:
+
+| Rayo | Predicado | Para qué |
+|---|---|---|
+| Cámara / reflexión / refracción | acepta todo | primer bloque visible |
+| Sombra del sol | no-aire, hasta 56 bloques | ¿llega el sol a este punto? |
+| Sombra de una linterna | no-aire **y** opaco, hasta la luz | el vidrio no tapa una lámpara |
+| Click del mouse | no-aire | qué bloque quitar, y contra qué cara poner uno |
+
+Encima del recorrido va un **salto de texels transparentes** (`first_visible_hit`):
+si el téxel golpeado tiene alfa < 0.5 —los huecos de las hojas, el vidrio— el rayo se
+adelanta un épsilon y sigue, hasta seis veces. Sin eso las hojas serían cubos
+sólidos.
+
+## Cómo se sombrea
+
+### Luz directa
+
+Blinn-Phong con sombras, ambiente hemisférico y emisión propia:
+
+```
+color = albedo·luz_sol·(n·l)·sombra                    difuso
+      + luz_sol·ks·(n·h)^shininess·sombra              especular (vector medio)
+      + albedo·lerp(suelo, cielo, n.y·0.5+0.5)·0.55    ambiente de dos tonos
+      + albedo·emisión                                 el bloque brilla solo
+      + luces puntuales                                glowstone, lava, portales
+```
+
+Detalles que importan:
+
+- **La sombra solo se traza si `n·l > 0`.** Una cara que da la espalda al sol no
+  recibe nada del sol, así que ese rayo —que además cruza toda la isla— no cambiaba
+  un píxel. Es la optimización que más rindió de todo el proyecto: 92.94 → 18.01 ms.
+- **Las sombras son suaves con lo transparente**: el rayo de sombra no se detiene en
+  el agua o el vidrio, los atraviesa multiplicando la transmisión.
+- **Luces puntuales**: los bloques emisivos se agrupan en clústeres (los 12 bloques de
+  la puerta son una sola luz) y por cada punto sombreado se consideran solo las tres
+  más cercanas dentro de 15 bloques, descartando por atenuación **antes** de pagar el
+  rayo de sombra.
+- **Mapas normales**: la normal de la cara se perturba con la normal derivada por
+  Sobel de la textura, llevada a mundo con el marco tangente de esa cara concreta.
+
+### Recursión: reflexión y refracción
+
+```
+radiance(rayo, profundidad, peso):
+    hit = primer_impacto(rayo) o devolver cielo
+    directo = luz_directa(hit)
+    si profundidad = 4 o peso < 0.015: devolver directo
+    si material transparente:  Fresnel divide en reflejado + refractado (Snell)
+    si material metálico:      un rayo reflejado, teñido por el metal
+    si no:                     directo
+```
+
+- **Fresnel de Schlick** decide cuánto se refleja y cuánto se transmite según el
+  ángulo: el agua vista de canto es un espejo, vista desde arriba es una ventana.
+- **Snell** para la dirección refractada, con **reflexión interna total** cuando no
+  existe rayo transmitido (el `refract` devuelve `None` y todo se va por el reflejo).
+- **Solo la rama dominante después del primer rebote**: una superficie transparente
+  lanza dos rayos, así que el conteo se duplica por nivel. A partir del segundo nivel
+  se sigue la rama con más peso y la otra reutiliza su color. Indistinguible a ojo,
+  un tercio menos de tiempo (17.12 → 13.52 ms en la medición de la fase 9).
+- **Corte por contribución**: cada rayo carga cuánto pesa todavía en el píxel final;
+  por debajo de 0.015 se abandona.
+
+## El pipeline del frame
+
+El renderer tiene tres caminos y el bucle de la ventana elige uno por frame:
+
+| Camino | Cuándo | Qué hace |
+|---|---|---|
+| `render_moving` | la cámara se mueve | tablero de ajedrez: traza la mitad de los píxeles e interpola la otra mitad de sus vecinos de **este** frame |
+| `render` | arrastre pesado (>45 ms) | resolución reducida y escalado por vecino más cercano |
+| `accumulate` | la cámara está quieta | una muestra jittereada por frame, promediada sobre la anterior |
+
+`accumulate` es donde vive casi toda la calidad:
+
+- El desplazamiento sub-píxel viene de una **secuencia de Halton** (bases 2 y 3), que
+  cubre el píxel uniformemente en vez de agruparse como lo haría un aleatorio con
+  pocas muestras.
+- El promedio es **corrido con piso en 1/16**: los primeros frames convergen (pesos
+  1, ½, ⅓…) y después el peso deja de encogerse, así la imagen sigue al agua y al
+  portal animados en vez de congelarse. Antes esto se resolvía reiniciando el
+  promedio, y eso era el "parpadeo" que se veía cada 16 frames.
+- Ya convergida, un píxel que no cambia solo se re-traza **1 de cada 8 frames**: se
+  guarda por píxel si su última muestra se movió más de 0.004 en luz lineal. El agua,
+  el portal y sus reflejos siguen trazándose siempre; los dos tercios quietos de la
+  imagen, no.
+
+Todo el sombreado ocurre en **luz lineal**; la conversión a sRGB (gamma 1/2.2) y el
+empaquetado a `0RGB` pasan una sola vez, al escribir el píxel.
+
+## Paralelismo
+
+`std::thread::scope`, sin rayon ni canales:
+
+- La imagen se corta en **tiras de 4 filas** y los hilos toman la siguiente de una
+  cola compartida (`AtomicUsize` + `Mutex`), en vez de repartirse el frame en partes
+  iguales. Importa porque una tira de cielo vacío cuesta una fracción de una que
+  cruza la isla: con reparto fijo, los hilos rápidos esperan al lento.
+- Cada tira es un `&mut [u32]` **disjunto** del framebuffer, así que durante el
+  sombreado no hay ningún candado: los hilos nunca tocan el mismo píxel.
+- La escena es inmutable durante el frame, de modo que se comparte por referencia
+  entre todos los hilos sin sincronización.
+- El mismo planificador (`process_chunks`) reparte también el horneado de la tabla
+  del cielo, que tiene el mismo problema de costo desigual (polos contra ecuador).
+
+Escalado medido sobre la escena de tres islas (900×600, `--bench 20`): 271.71 ms con
+un hilo → 33.49 ms con 16, **8.11×** en una CPU de 8 núcleos físicos.
+
 ## La escena
 
 Tres islas. La central sigue el diorama de referencia: isla flotante con un **templo de columnas** y su
@@ -178,15 +391,22 @@ barandas de cercas y postes colgando al vacío:
 
 ## Rendimiento
 
-Escena completa (isla 48×48), 900×600, CPU de 8 núcleos / 16 hilos:
+Escena completa (tres islas, 128×60×64), 900×600, CPU de 8 núcleos / 16 hilos,
+medido con `--bench 20`:
 
 | Hilos | ms/frame | fps | Aceleración |
 |---|---|---|---|
-| 1 | 239.85 | 4.2 | 1.00× |
-| 4 | 63.92 | 15.6 | 3.75× |
-| 16 | 27.03 | 37.0 | **8.55×** |
+| 1 | 271.71 | 3.7 | 1.00× |
+| 2 | 137.88 | 7.3 | 1.97× |
+| 4 | 73.02 | 13.7 | 3.72× |
+| 8 | 43.61 | 22.9 | 6.23× |
+| 16 | 33.49 | 29.9 | **8.11×** |
 
-Optimizaciones aplicadas, cada una medida a 640×520 con 16 hilos:
+Lineal hasta 8 hilos —los núcleos físicos—; de 8 a 16 el salto es menor porque son
+hilos lógicos sobre los mismos núcleos.
+
+Optimizaciones aplicadas, cada una medida a 640×520 con 16 hilos sobre la escena de
+una isla (antes de que crecieran las vecinas):
 
 | Cambio | ms/frame |
 |---|---|
@@ -197,6 +417,23 @@ Optimizaciones aplicadas, cada una medida a 640×520 con 16 hilos:
 | Agrupar bloques emisivos vecinos en una sola luz | 17.89 |
 | Descartar linternas cuya contribución es despreciable | 17.12 |
 | Seguir solo la rama dominante tras la primera división | **13.52** |
+
+### Ideas medidas y descartadas
+
+Tan útiles como las que sí entraron, y por eso están aquí:
+
+| Idea | Resultado | Por qué falló |
+|---|---|---|
+| Saltar la macro-celda vacía entera (con división por eje) | 29.5 → 33.9 ms | un paso del DDA es una comparación y dos sumas; calcular el salto cuesta más que los cuatro pasos que ahorra |
+| Lo mismo sin divisiones (`t_max + k·t_delta`) | 29.5 → **37.6 ms** | además mete una rama en el bucle más caliente del programa |
+| Jerarquía de celdas de 8 y 16, y dos niveles | 18.5 → 19.6–23.8 ms | misma razón, con el mundo tres veces más angosto |
+| Recortar el rayo contra la caja del contenido | 18.5 → 18.8 ms | y rompía el cálculo de la cara de entrada |
+| Rejilla espacial para las luces | sin cambio | con 18 clústeres, el descarte por atenuación ya las quita antes |
+
+Nota de método que costó tiempo dos veces: `cargo test --release` **no** reconstruye
+el binario de release. Dos mediciones salieron de un ejecutable viejo y llevaron a
+conclusiones falsas, así que desde entonces toda medición va precedida de un
+`cargo build --release` explícito.
 
 El ciclo de día y noche cuesta **~4.5 ms cada vez que rehornea el cielo** (medido con
 `--bench N --cycle`, que fuerza un rehorneado por frame: 18.49 → 23.0 ms), pero lo caro
@@ -243,10 +480,10 @@ src/
   terrain.rs     generación procedural de la isla, el montículo y el río
   structures.rs  templo, dragón, gran árbol, puente, ruina y las luces
   neighbours.rs  composición del mundo: isla del Nether, granja y los puentes
-  world.rs       grid de vóxeles + DDA
-  camera.rs      cámara orbital
+  world.rs       grid de vóxeles, formas parciales y el DDA (única forma de trazar)
+  camera.rs      cámara orbital y de vuelo libre; genera el rayo de cada píxel
   skybox.rs      cielo procedural y cubemap
   scene.rs       mundo + assets + iluminación + reloj de animación
   parallel.rs    reparto dinámico de trabajo entre hilos
-  render.rs      sombreado, recursión y pipeline de frame
+  render.rs      sombreado, recursión, refinamiento progresivo y pipeline de frame
 ```
