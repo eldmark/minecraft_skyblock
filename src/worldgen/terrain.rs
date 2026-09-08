@@ -7,9 +7,9 @@
 //! great tree, a stream running across the middle and spilling off both rims, and
 //! a broad terrace on the far side where the temple stands.
 
-use crate::blocks::*;
-use crate::noise::Noise;
-use crate::world::World;
+use crate::assets::blocks::*;
+use crate::worldgen::noise::Noise;
+use crate::scene::world::World;
 
 /// Main island footprint in blocks. The rubric asks for at least 16x16.
 ///

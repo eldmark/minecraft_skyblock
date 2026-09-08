@@ -1,16 +1,26 @@
-//! Block -> textures -> material. The table that turns block ids into surfaces.
+//! Block -> textures -> material: everything a surface is made of.
 //!
-//! Textures are loaded once from the pack and shared by index, so blocks that use
-//! the same image (every stone face, say) decode it only once.
+//! This module is the table that turns block ids into surfaces; its submodules
+//! are the pieces that table is built from — the ids themselves, the optical
+//! parameters, the textures in linear light, and the access to the pack they come
+//! from.
+//!
+//! Textures are loaded once and shared by index, so blocks that use the same
+//! image (every stone face, say) decode it only once.
+
+pub mod blocks;
+pub mod material;
+pub mod pack;
+pub mod texture;
 
 use std::collections::HashMap;
 
-use crate::blocks::{self, Block, COUNT};
-use crate::material::{missing_color, Material};
+use crate::assets::blocks::{Block, COUNT};
+use crate::assets::material::{missing_color, Material};
 use crate::math::{vec3, Vec3};
-use crate::pack::Pack;
-use crate::texture::Texture;
-use crate::world::Face;
+use crate::assets::pack::Pack;
+use crate::assets::texture::Texture;
+use crate::scene::world::Face;
 
 /// Which pack texture each face of a block uses.
 #[derive(Clone, Copy)]

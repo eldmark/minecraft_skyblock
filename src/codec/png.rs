@@ -146,7 +146,7 @@ mod tests {
 // Decoding
 // ---------------------------------------------------------------------------
 
-use crate::inflate::inflate_zlib;
+use crate::codec::inflate::inflate_zlib;
 
 /// An 8-bit RGBA image.
 #[derive(Clone)]

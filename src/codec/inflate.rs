@@ -275,7 +275,7 @@ pub fn inflate_zlib(data: &[u8]) -> Result<Vec<u8>, String> {
         data[data.len() - 2],
         data[data.len() - 1],
     ]);
-    if crate::png::adler32(&out) != checksum {
+    if crate::codec::png::adler32(&out) != checksum {
         return Err("zlib: Adler-32 mismatch".to_string());
     }
     Ok(out)
@@ -293,7 +293,7 @@ mod tests {
         zlib.extend_from_slice(&(raw.len() as u16).to_le_bytes());
         zlib.extend_from_slice(&(!(raw.len() as u16)).to_le_bytes());
         zlib.extend_from_slice(&raw);
-        zlib.extend_from_slice(&crate::png::adler32(&raw).to_be_bytes());
+        zlib.extend_from_slice(&crate::codec::png::adler32(&raw).to_be_bytes());
         assert_eq!(inflate_zlib(&zlib).unwrap(), raw);
     }
 

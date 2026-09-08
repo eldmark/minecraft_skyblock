@@ -6,12 +6,12 @@
 //! * a real cubemap built from the pack's own panorama faces (`--sky panorama`),
 //!   which exercises the cube lookup against actual images.
 
-use crate::daylight::{self, DayLight};
+use crate::scene::daylight::{self, DayLight};
 use crate::math::{vec3, Vec3};
-use crate::noise::Noise;
-use crate::pack::Pack;
-use crate::parallel::process_chunks;
-use crate::texture::Texture;
+use crate::worldgen::noise::Noise;
+use crate::assets::pack::Pack;
+use crate::render::parallel::process_chunks;
+use crate::assets::texture::Texture;
 
 /// Minecraft's title-screen panorama, which every pack ships: six 768x768 faces.
 const PANORAMA: [&str; 6] = [

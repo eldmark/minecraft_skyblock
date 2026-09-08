@@ -7,10 +7,10 @@
 //! West is the nether island: netherrack, lava and a lit portal. East is the
 //! farm: a plank house, a watered field, hay and a fenced pen with animals.
 
-use crate::blocks::*;
-use crate::noise::Noise;
-use crate::terrain::{Island, HEIGHT, ORIGIN, SURFACE_LEVEL, WORLD_X, WORLD_Z};
-use crate::world::World;
+use crate::assets::blocks::*;
+use crate::worldgen::noise::Noise;
+use crate::worldgen::terrain::{Island, HEIGHT, ORIGIN, SURFACE_LEVEL, WORLD_X, WORLD_Z};
+use crate::scene::world::World;
 
 /// Where the two neighbours sit, in world coordinates. Both are on the main
 /// island's centre line so the bridges run straight.
@@ -567,8 +567,8 @@ fn bridge(world: &mut World, ground: &Surface, from: (i32, i32), direction: i32,
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::structures;
-    use crate::terrain;
+    use crate::worldgen::structures;
+    use crate::worldgen::terrain;
 
     fn built(seed: u32) -> World {
         let mut island = terrain::generate(seed);

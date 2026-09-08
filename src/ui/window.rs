@@ -5,7 +5,7 @@ use std::io;
 
 use minifb::{Key, MouseButton, MouseMode, Scale, ScaleMode, Window, WindowOptions};
 
-use crate::output::{Framebuffer, Output};
+use crate::render::output::{Framebuffer, Output};
 
 /// What the user did this frame, in renderer terms rather than key codes.
 #[derive(Clone, Copy, Debug, Default)]

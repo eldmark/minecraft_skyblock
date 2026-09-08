@@ -1,18 +1,26 @@
 //! Everything the renderer needs to shade a frame: the world, its assets, the
 //! lighting setup, and the animation clock.
+//!
+//! The submodules are the scene's parts — the voxel grid and its ray traversal,
+//! the camera that generates the rays, the sky they end in, and the day/night
+//! cycle that lights them.
+
+pub mod camera;
+pub mod daylight;
+pub mod skybox;
+pub mod world;
 
 use crate::assets::Assets;
-use crate::daylight;
 use crate::math::Vec3;
-use crate::pack::Pack;
-use crate::blocks::{self, Block};
-use crate::noise::Noise;
-use crate::parallel::thread_count;
-use crate::skybox::Skybox;
-use crate::neighbours;
-use crate::structures;
-use crate::terrain::{self, Island};
-use crate::world::World;
+use crate::assets::pack::Pack;
+use crate::assets::blocks::{self, Block};
+use crate::worldgen::noise::Noise;
+use crate::render::parallel::thread_count;
+use crate::scene::skybox::Skybox;
+use crate::worldgen::neighbours;
+use crate::worldgen::structures;
+use crate::worldgen::terrain::{self, Island};
+use crate::scene::world::World;
 
 /// How finely the baked sky follows the clock. The sky is re-baked only when the
 /// cycle crosses one of these steps, which keeps a smooth cycle affordable.

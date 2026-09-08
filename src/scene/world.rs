@@ -125,7 +125,7 @@ impl World {
         ];
         let mut shapes = [Shape::Full; 256];
         for (id, shape) in shapes.iter_mut().enumerate() {
-            *shape = crate::blocks::shape(id as BlockId);
+            *shape = crate::assets::blocks::shape(id as BlockId);
         }
         World {
             blocks: vec![AIR; size[0] * size[1] * size[2]],
@@ -477,7 +477,7 @@ mod tests {
 
     #[test]
     fn a_slab_only_fills_the_bottom_half_of_its_cell() {
-        let w = shaped_world(crate::blocks::OAK_SLAB);
+        let w = shaped_world(crate::assets::blocks::OAK_SLAB);
         // Straight down onto the middle of the cell: the surface is at 4.5, not 5.
         let down = Ray::new(vec3(4.5, 7.0, 4.5), vec3(0.0, -1.0, 0.0));
         let hit = w.trace(&down, 100.0, |_| true).expect("the slab should be hit");
@@ -494,7 +494,7 @@ mod tests {
 
     #[test]
     fn a_fence_is_a_post_with_rails_towards_its_neighbours() {
-        let mut w = shaped_world(crate::blocks::OAK_FENCE);
+        let mut w = shaped_world(crate::assets::blocks::OAK_FENCE);
         // Down the middle: the post is there.
         let post = Ray::new(vec3(4.5, 7.0, 4.5), vec3(0.0, -1.0, 0.0));
         assert!(w.trace(&post, 100.0, |_| true).is_some());
@@ -503,7 +503,7 @@ mod tests {
         assert!(w.trace(&corner, 100.0, |_| true).is_none());
 
         // Give it a neighbour and a rail appears between the two, at rail height.
-        w.set(3, 4, 4, crate::blocks::OAK_FENCE);
+        w.set(3, 4, 4, crate::assets::blocks::OAK_FENCE);
         let rail = Ray::new(vec3(4.2, 7.0, 4.5), vec3(0.0, -1.0, 0.0));
         let hit = w.trace(&rail, 100.0, |_| true).expect("the rail should be hit");
         assert!((hit.t - (7.0 - 4.75)).abs() < 1e-2, "hit at {}", hit.t);
@@ -514,9 +514,9 @@ mod tests {
         // A post with four neighbours needs nine boxes; the array used to hold
         // five, so the third and fourth arm were silently dropped and a fence in
         // a T or a cross was drawn with pieces missing.
-        let mut w = shaped_world(crate::blocks::OAK_FENCE);
+        let mut w = shaped_world(crate::assets::blocks::OAK_FENCE);
         for (x, z) in [(3, 4), (5, 4), (4, 3), (4, 5)] {
-            w.set(x, 4, z, crate::blocks::OAK_FENCE);
+            w.set(x, 4, z, crate::assets::blocks::OAK_FENCE);
         }
         for (dx, dz) in [(-0.3, 0.0), (0.3, 0.0), (0.0, -0.3), (0.0, 0.3)] {
             let ray = Ray::new(vec3(4.5 + dx, 7.0, 4.5 + dz), vec3(0.0, -1.0, 0.0));
@@ -533,7 +533,7 @@ mod tests {
         // A slab in front of a full block: a ray through the empty upper half
         // must carry on and hit what is behind it.
         let mut w = World::new([8, 8, 8]);
-        w.set(4, 4, 4, crate::blocks::OAK_SLAB);
+        w.set(4, 4, 4, crate::assets::blocks::OAK_SLAB);
         w.set(6, 4, 4, 1);
         let ray = Ray::new(vec3(0.0, 4.9, 4.5), vec3(1.0, 0.0, 0.0));
         let hit = w.trace(&ray, 100.0, |_| true).expect("should reach the block");

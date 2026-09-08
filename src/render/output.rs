@@ -7,7 +7,7 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
-use crate::png;
+use crate::codec::png;
 
 /// A linear-indexed 0RGB framebuffer, the format minifb wants.
 pub struct Framebuffer {

@@ -7,10 +7,10 @@
 
 use std::path::Path;
 
-use crate::hud::{blit, dim, fill_rect, Font};
-use crate::output::Framebuffer;
-use crate::pack::Pack;
-use crate::png::{self, Image};
+use crate::ui::hud::{blit, dim, fill_rect, Font};
+use crate::render::output::Framebuffer;
+use crate::assets::pack::Pack;
+use crate::codec::png::{self, Image};
 
 /// Where the background lives. It is a still of a Minecraft dragon build,
 /// converted to PNG once so the program only ever needs its own decoder.

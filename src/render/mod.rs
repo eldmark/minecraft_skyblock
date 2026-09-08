@@ -3,17 +3,23 @@
 //! One camera ray per pixel: walk the grid, sample the block's texture, perturb the
 //! face normal with the texture's normal map, then light it with a sun (shadowed),
 //! a two-tone sky ambient, and the material's own emission.
+//!
+//! Alongside it: the thread pool that hands out strips of the frame, and the
+//! framebuffer with the two places it can end up — a window or a PNG.
 
-use crate::blocks;
-use crate::camera::Camera;
-use crate::material::{f0_from_ior, Material};
+pub mod output;
+pub mod parallel;
+
+use crate::assets::blocks;
+use crate::scene::camera::Camera;
+use crate::assets::material::{f0_from_ior, Material};
 use crate::math::{fresnel_schlick, to_srgb_u32, vec3, Vec3};
-use crate::output::Framebuffer;
-use crate::parallel::{render_strips, thread_count};
+use crate::render::output::Framebuffer;
+use crate::render::parallel::{render_strips, thread_count};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Mutex;
 use crate::scene::Scene;
-use crate::world::{Face, Hit, Ray, World};
+use crate::scene::world::{Face, Hit, Ray, World};
 
 /// Rows handed out per work item. Small enough to balance sky against island,
 /// large enough that queue traffic stays negligible.
@@ -739,7 +745,7 @@ fn metal_shade(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pack::Pack;
+    use crate::assets::pack::Pack;
     use std::path::Path;
 
     /// These tests skip when neither the extracted textures nor the pack are

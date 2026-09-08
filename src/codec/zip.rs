@@ -7,7 +7,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use crate::inflate::inflate_raw;
+use crate::codec::inflate::inflate_raw;
 
 const END_OF_CENTRAL_DIR: u32 = 0x0605_4B50;
 const CENTRAL_FILE_HEADER: u32 = 0x0201_4B50;

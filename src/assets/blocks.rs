@@ -65,8 +65,8 @@ pub fn is_emissive(block: Block) -> bool {
 
 /// How much of its cell a block fills. Everything is a full cube unless it is
 /// one of the few shapes the bridge and the farm need.
-pub fn shape(block: Block) -> crate::world::Shape {
-    use crate::world::Shape;
+pub fn shape(block: Block) -> crate::scene::world::Shape {
+    use crate::scene::world::Shape;
     match block {
         OAK_SLAB => Shape::Slab,
         OAK_FENCE => Shape::Fence,

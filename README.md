@@ -170,21 +170,22 @@ El proyecto está escrito en capas con dependencias en una sola dirección: nada
 que está abajo sabe de lo que está arriba.
 
 ```
-  main.rs ──► window.rs ──► minifb          (única dependencia externa)
-     │   └──► splash.rs, hud.rs             (interfaz compuesta a mano)
+  main.rs ──► ui/ ──► window.rs ──► minifb     (única dependencia externa)
+     │               splash.rs, hud.rs         (interfaz compuesta a mano)
      ▼
-  render.rs ──► camera.rs
+  render/ ──► mod.rs, parallel.rs, output.rs
      │
-     └──► scene.rs ──┬──► world.rs   ◄── terrain.rs ─┐
-                     │                  structures.rs├──► noise.rs
-                     │                  neighbours.rs┘
-                     ├──► assets.rs ──┬──► texture.rs ──► pack.rs ──► zip.rs
-                     │                └──► material.rs                 │
-                     ├──► skybox.rs                                    ▼
-                     └──► daylight.rs                    png.rs ──► inflate.rs
+     └──► scene/ ──┬──► world.rs   ◄── worldgen/ terrain.rs ─┐
+                   │                             structures.rs├──► noise.rs
+                   │                             neighbours.rs┘
+                   ├──► camera.rs
+                   ├──► skybox.rs, daylight.rs
+                   │
+                   └──► assets/ ──┬──► texture.rs, material.rs, blocks.rs
+                                  └──► pack.rs ──► codec/ zip.rs, png.rs,
+                                                          inflate.rs
 
-  transversales: math.rs (Vec3, Fresnel, Snell), parallel.rs (cola de tiras),
-                 output.rs (trait Output: ventana o PNG)
+  transversal: math.rs (Vec3, Fresnel, Snell)
 ```
 
 Las tres piezas centrales:
@@ -473,31 +474,47 @@ Reproducible con `--bench N` y `--bench-idle N`, más `--width W --height H
 
 ## Estructura
 
+Un archivo por pieza, agrupados por función. Las dependencias van en una sola
+dirección: `codec` no sabe qué es un bloque, `worldgen` no sabe qué es un rayo, y
+`ui` es lo único que sabe que existe una ventana.
+
 ```
 src/
-  main.rs        modos: ventana, render offline, benchmark, verificación del pack
-  output.rs      trait Output: ventana o PNGs; el renderer no sabe cuál
-  window.rs      único módulo que toca minifb
-  splash.rs      pantalla de título: fondo, créditos, botones y reglas
-  hud.rs         hotbar, iconos y tipografía del pack, compuestos sobre el frame
-  math.rs        Vec3, reflect, refract (Snell + TIR), Fresnel, gamma
-  inflate.rs     DEFLATE (stored, Huffman fijo y dinámico) + zlib
-  png.rs         encoder y decoder PNG propios
-  zip.rs         lector del texture pack
-  texture.rs     texturas en luz lineal, animación y normales por Sobel
-  pack.rs        acceso a las texturas: carpeta extraida o el .zip del pack
-  blocks.rs      ids de bloque
-  material.rs    parámetros ópticos por material
-  assets.rs      bloque → textura por cara → material
-  noise.rs       Perlin 2D/3D y fBm
-  daylight.rs    ciclo día/noche: sol, luna, paletas de cielo y ambiente
-  terrain.rs     generación procedural de la isla, el montículo y el río
-  structures.rs  templo, dragón, gran árbol, puente, ruina y las luces
-  neighbours.rs  composición del mundo: isla del Nether, granja y los puentes
-  world.rs       grid de vóxeles, formas parciales y el DDA (única forma de trazar)
-  camera.rs      cámara orbital y de vuelo libre; genera el rayo de cada píxel
-  skybox.rs      cielo procedural y cubemap
-  scene.rs       mundo + assets + iluminación + reloj de animación
-  parallel.rs    reparto dinámico de trabajo entre hilos
-  render.rs      sombreado, recursión, refinamiento progresivo y pipeline de frame
+  main.rs            modos (ventana, render offline, benchmarks), CLI y el bucle
+  math.rs            Vec3, reflect, refract (Snell + TIR), Fresnel, gamma
+
+  codec/             formatos de archivo, escritos a mano
+    inflate.rs         DEFLATE (stored, Huffman fijo y dinámico) + zlib
+    png.rs             encoder y decoder PNG
+    zip.rs             lector del .zip del texture pack
+
+  assets/            de qué está hecha una superficie
+    mod.rs             tabla bloque → textura por cara → material
+    blocks.rs          ids de bloque y su forma (cubo, losa, cerca)
+    material.rs        parámetros ópticos: albedo, especular, ior, emisión…
+    texture.rs         texturas en luz lineal, animación y normales por Sobel
+    pack.rs            acceso a las texturas: carpeta extraída o el .zip
+
+  worldgen/          qué contiene el mundo, antes de trazar un solo rayo
+    noise.rs           Perlin 2D/3D y fBm
+    terrain.rs         la isla principal: relieve, río, vetas, árboles
+    structures.rs      templo, dragón, gran árbol, puente, ruina y las luces
+    neighbours.rs      composición: isla del Nether, granja y los puentes
+
+  scene/             lo que el renderer consume
+    mod.rs             mundo + assets + iluminación + reloj de animación
+    world.rs           grid de vóxeles, formas parciales y el DDA
+    camera.rs          órbita y vuelo libre; genera el rayo de cada píxel
+    skybox.rs          cielo procedural horneado, y el cubemap del panorama
+    daylight.rs        ciclo día/noche: sol, luna, paletas de cielo y ambiente
+
+  render/            de la escena a los píxeles
+    mod.rs             sombreado, recursión, refinamiento y pipeline de frame
+    parallel.rs        reparto dinámico de tiras entre hilos
+    output.rs          Framebuffer y el trait Output: ventana o PNG
+
+  ui/                lo que la persona ve y toca
+    window.rs          único módulo que toca minifb
+    splash.rs          pantalla de título: fondo, créditos, botones y reglas
+    hud.rs             hotbar, inventario, cruz y tipografía del pack
 ```

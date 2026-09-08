@@ -8,9 +8,9 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::png;
-use crate::texture::Texture;
-use crate::zip::ZipArchive;
+use crate::codec::png;
+use crate::assets::texture::Texture;
+use crate::codec::zip::ZipArchive;
 
 pub const BLOCK_DIR: &str = "assets/minecraft/textures/block/";
 

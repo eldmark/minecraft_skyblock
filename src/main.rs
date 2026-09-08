@@ -6,41 +6,24 @@
 //!   skyblock --bench 60            time N frames, no window, no I/O
 
 mod assets;
-mod blocks;
-mod camera;
-mod daylight;
-mod hud;
-mod inflate;
-mod neighbours;
-mod noise;
-mod material;
+mod codec;
 mod math;
-mod output;
-mod pack;
-mod parallel;
-mod png;
 mod render;
 mod scene;
-mod skybox;
-mod splash;
-mod structures;
-mod terrain;
-mod texture;
-mod window;
-mod world;
-mod zip;
+mod ui;
+mod worldgen;
 
 use std::io;
 use std::path::PathBuf;
 use std::time::Instant;
 
-use camera::{Camera, Mode as CameraMode};
 use math::{vec3, Vec3};
-use output::{FileOutput, Framebuffer, NullOutput, Output};
+use render::output::{FileOutput, Framebuffer, NullOutput, Output};
 use render::Renderer;
+use scene::camera::{Camera, Mode as CameraMode};
+use scene::world::World;
 use scene::Scene;
-use window::WindowOutput;
-use world::World;
+use ui::window::WindowOutput;
 
 enum Mode {
     Window,
@@ -224,7 +207,7 @@ usage: skyblock [--window | --render DIR | --bench N] [--frames N] [--width W] [
 /// Load the resource pack and build the scene, with a clear message when the pack
 /// is missing: it is not committed to the repository.
 fn load_scene(seed: u32, panorama_sky: bool, time: f32) -> io::Result<Scene> {
-    let pack = pack::Pack::open(None).map_err(io::Error::other)?;
+    let pack = assets::pack::Pack::open(None).map_err(io::Error::other)?;
     Scene::load(seed, &pack, panorama_sky, time).map_err(io::Error::other)
 }
 
@@ -247,7 +230,7 @@ fn scene_camera(world: &World) -> Camera {
     // structure near the upper third, the way the reference diorama is framed.
     let center = vec3(
         world.size[0] as f32 * 0.5,
-        terrain::SURFACE_LEVEL + 4.0,
+        worldgen::terrain::SURFACE_LEVEL + 4.0,
         world.size[2] as f32 * 0.5,
     );
     // Far enough back to hold the three islands and both bridges.
@@ -255,7 +238,7 @@ fn scene_camera(world: &World) -> Camera {
 }
 
 /// The cell a right click fills: the one against the face that was hit.
-fn placement_cell(hit: &world::Hit) -> (i32, i32, i32) {
+fn placement_cell(hit: &scene::world::Hit) -> (i32, i32, i32) {
     let n = hit.face.normal();
     (
         hit.voxel[0] + n.x as i32,
@@ -274,7 +257,7 @@ fn run_headless(mut out: Box<dyn Output>, args: &Args, report: bool) -> io::Resu
     }
     // Offline the overlay can go straight onto the frame: nothing reads it back.
     let mut overlay = match args.hud {
-        true => Some(hud::Hud::load(&pack::Pack::open(None).map_err(io::Error::other)?)
+        true => Some(ui::hud::Hud::load(&assets::pack::Pack::open(None).map_err(io::Error::other)?)
             .map_err(io::Error::other)?),
         false => None,
     };
@@ -398,14 +381,14 @@ tracing {:.0}% of the pixels",
 fn run_splash(
     win: &mut WindowOutput,
     frame: &mut Framebuffer,
-    splash: &mut splash::Splash,
+    splash: &mut ui::splash::Splash,
 ) -> io::Result<bool> {
     while win.is_open() {
         let input = win.poll_input();
         let (w, h) = win.size();
         frame.resize(w, h);
 
-        if input.escape && splash.escape() == Some(splash::Choice::Quit) {
+        if input.escape && splash.escape() == Some(ui::splash::Choice::Quit) {
             return Ok(false);
         }
         if let Some((mx, my)) = input.mouse {
@@ -421,8 +404,8 @@ fn run_splash(
         }
         // The choice comes back only once its button has been seen to sink in.
         match splash.tick() {
-            Some(splash::Choice::Play) => return Ok(true),
-            Some(splash::Choice::Quit) => return Ok(false),
+            Some(ui::splash::Choice::Play) => return Ok(true),
+            Some(ui::splash::Choice::Quit) => return Ok(false),
             None => {}
         }
     }
@@ -436,14 +419,14 @@ fn run_splash(
 fn load_while_spinning(
     win: &mut WindowOutput,
     frame: &mut Framebuffer,
-    splash: &splash::Splash,
+    splash: &ui::splash::Splash,
     args: &Args,
-) -> io::Result<Option<(Scene, hud::Hud)>> {
+) -> io::Result<Option<(Scene, ui::hud::Hud)>> {
     let (seed, panorama, time) = (args.seed, args.panorama_sky, args.time);
-    let worker = std::thread::spawn(move || -> io::Result<(Scene, hud::Hud)> {
+    let worker = std::thread::spawn(move || -> io::Result<(Scene, ui::hud::Hud)> {
         let scene = load_scene(seed, panorama, time)?;
-        let pack = pack::Pack::open(None).map_err(io::Error::other)?;
-        let hud = hud::Hud::load(&pack).map_err(io::Error::other)?;
+        let pack = assets::pack::Pack::open(None).map_err(io::Error::other)?;
+        let hud = ui::hud::Hud::load(&pack).map_err(io::Error::other)?;
         Ok((scene, hud))
     });
 
@@ -469,13 +452,13 @@ fn load_while_spinning(
 }
 
 fn run_window(args: &Args) -> io::Result<()> {
-    let pack = pack::Pack::open(None).map_err(io::Error::other)?;
+    let pack = assets::pack::Pack::open(None).map_err(io::Error::other)?;
     let mut win = WindowOutput::new("Skyblock Diorama", args.width, args.height)?;
     let mut frame = Framebuffer::new(args.width, args.height);
 
     // Title screen first, with the window already up: the scene takes a moment
     // to build and there is no reason to stare at a black rectangle for it.
-    let mut splash = splash::Splash::load(&pack).map_err(io::Error::other)?;
+    let mut splash = ui::splash::Splash::load(&pack).map_err(io::Error::other)?;
     if !run_splash(&mut win, &mut frame, &mut splash)? {
         return Ok(());
     }
@@ -564,20 +547,20 @@ fn run_window(args: &Args) -> io::Result<()> {
                     let (cx, cy) = input.mouse.unwrap_or((mx, my));
                     if let Some((block, icon)) = hud.inventory_pick(&frame, cx, cy) {
                         hud.set_held(block, icon);
-                        hud.say(format!("bloque: {}", blocks::name(block)));
+                        hud.say(format!("bloque: {}", assets::blocks::name(block)));
                     }
                 }
             } else if inside && (input.click_left || input.click_right) {
                 let ray = camera.ray(mx as usize, my as usize, fw, fh, (0.5, 0.5));
-                if let Some(hit) = scene.world().trace(&ray, 400.0, |b| b != blocks::AIR) {
+                if let Some(hit) = scene.world().trace(&ray, 400.0, |b| b != assets::blocks::AIR) {
                     if input.click_left {
                         let [x, y, z] = hit.voxel;
-                        scene.set_block(x, y, z, blocks::AIR);
+                        scene.set_block(x, y, z, assets::blocks::AIR);
                         edited = true;
                     } else if let Some(block) = hud.held() {
                         // Against the face that was hit, the way the game does it.
                         let (x, y, z) = placement_cell(&hit);
-                        if scene.world().get(x, y, z) == blocks::AIR {
+                        if scene.world().get(x, y, z) == assets::blocks::AIR {
                             scene.set_block(x, y, z, block);
                             edited = true;
                         }
@@ -597,19 +580,19 @@ fn run_window(args: &Args) -> io::Result<()> {
         let mut want_reseed = input.reseed;
         let mut item_nudge = 0.0;
         match fired {
-            Some(hud::Action::ToggleCamera) => toggle_camera = true,
-            Some(hud::Action::TimeForward) => item_nudge = 0.004,
-            Some(hud::Action::TimeBack) => item_nudge = -0.004,
-            Some(hud::Action::Screenshot) => want_screenshot = true,
-            Some(hud::Action::Reseed) => want_reseed = true,
+            Some(ui::hud::Action::ToggleCamera) => toggle_camera = true,
+            Some(ui::hud::Action::TimeForward) => item_nudge = 0.004,
+            Some(ui::hud::Action::TimeBack) => item_nudge = -0.004,
+            Some(ui::hud::Action::Screenshot) => want_screenshot = true,
+            Some(ui::hud::Action::Reseed) => want_reseed = true,
             // The spyglass steps 1 -> 2 -> 3 -> 4 -> 1: one item, the whole cycle.
-            Some(hud::Action::Quality) => {
+            Some(ui::hud::Action::Quality) => {
                 quality = quality % 4 + 1;
                 hud.set_quality(quality);
             }
-            Some(hud::Action::Quit) => break,
+            Some(ui::hud::Action::Quit) => break,
             // The block slot does nothing on Enter: it is worked with the mouse.
-            Some(hud::Action::Place) => {}
+            Some(ui::hud::Action::Place) => {}
             None => {}
         }
 
@@ -765,7 +748,7 @@ fn run_window(args: &Args) -> io::Result<()> {
 /// Exercises the hand-written ZIP reader, inflate and PNG decoder against the
 /// real pack, and can dump raw pixels so they can be diffed against a reference.
 fn check_pack(dump: Option<&(String, PathBuf)>) -> io::Result<()> {
-    let pack = pack::Pack::open(None).map_err(io::Error::other)?;
+    let pack = assets::pack::Pack::open(None).map_err(io::Error::other)?;
     println!("pack: {} ({} entries)", pack.path.display(), pack.entry_count());
 
     if let Some((name, out_path)) = dump {
@@ -829,7 +812,7 @@ mod scene_tests {
 
     #[test]
     fn the_placeholder_island_is_visible_from_the_default_camera() {
-        let world = terrain::generate(2024).world;
+        let world = worldgen::terrain::generate(2024).world;
         let camera = scene_camera(&world);
         let (w, h) = (64usize, 48usize);
         let mut hits = 0;
@@ -846,7 +829,7 @@ mod scene_tests {
 
     #[test]
     fn a_click_breaks_the_block_it_lands_on_and_puts_one_back_on_its_face() {
-        let Ok(pack) = pack::Pack::open(None) else {
+        let Ok(pack) = assets::pack::Pack::open(None) else {
             return;
         };
         let mut scene = Scene::load(2024, &pack, false, 0.25).unwrap();
@@ -857,20 +840,20 @@ mod scene_tests {
         let ray = camera.ray(w / 2, h / 2, w, h, (0.5, 0.5));
         let hit = scene
             .world()
-            .trace(&ray, 400.0, |b| b != blocks::AIR)
+            .trace(&ray, 400.0, |b| b != assets::blocks::AIR)
             .expect("the camera should be looking at the island");
         let [x, y, z] = hit.voxel;
-        assert_ne!(scene.world().get(x, y, z), blocks::AIR);
+        assert_ne!(scene.world().get(x, y, z), assets::blocks::AIR);
 
         // Breaking it empties the cell...
-        scene.set_block(x, y, z, blocks::AIR);
-        assert_eq!(scene.world().get(x, y, z), blocks::AIR);
+        scene.set_block(x, y, z, assets::blocks::AIR);
+        assert_eq!(scene.world().get(x, y, z), assets::blocks::AIR);
 
         // ...and placing goes against the face that was hit, never inside it.
         let (px, py, pz) = placement_cell(&hit);
         assert_ne!((px, py, pz), (x, y, z));
-        scene.set_block(px, py, pz, blocks::GLOWSTONE);
-        assert_eq!(scene.world().get(px, py, pz), blocks::GLOWSTONE);
+        scene.set_block(px, py, pz, assets::blocks::GLOWSTONE);
+        assert_eq!(scene.world().get(px, py, pz), assets::blocks::GLOWSTONE);
 
         // A new emitter is a new light: the scene re-collects them on every edit.
         let p = vec3(px as f32 + 0.5, py as f32 + 0.5, pz as f32 + 0.5);
@@ -882,7 +865,7 @@ mod scene_tests {
 
     #[test]
     fn the_island_stays_in_frame_through_a_full_orbit() {
-        let world = terrain::generate(2024).world;
+        let world = worldgen::terrain::generate(2024).world;
         let mut camera = scene_camera(&world);
         let (w, h) = (64usize, 48usize);
         for step in 0..8 {

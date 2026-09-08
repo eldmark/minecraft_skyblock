@@ -9,7 +9,7 @@
 //! between them never moves the picture.
 
 use crate::math::{vec3, Vec3};
-use crate::world::Ray;
+use crate::scene::world::Ray;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mode {

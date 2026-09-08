@@ -8,10 +8,10 @@
 //! terrace, a great tree on the rocky outcrop, an arched bridge over the stream,
 //! and a small ruin of three columns on the near side.
 
-use crate::blocks::*;
+use crate::assets::blocks::*;
 use crate::math::{vec3, Vec3};
-use crate::terrain::{Island, HILL, SIZE, WATER_LEVEL};
-use crate::world::World;
+use crate::worldgen::terrain::{Island, HILL, SIZE, WATER_LEVEL};
+use crate::scene::world::World;
 
 /// Where the temple stands, and how big its stylobate is.
 const TEMPLE: (i32, i32) = (25, 12);
@@ -48,7 +48,7 @@ fn level(island: &mut Island, x0: i32, z0: i32, w: i32, d: i32, margin: i32) -> 
         }
     }
     if count == 0 {
-        return crate::terrain::SURFACE_LEVEL as i32;
+        return crate::worldgen::terrain::SURFACE_LEVEL as i32;
     }
     // Never level below the water line, or the stream would flood the terrace.
     let target = (sum / count).max(WATER_LEVEL + 1);
@@ -716,7 +716,7 @@ pub fn collect_lights(world: &World) -> Vec<(Vec3, Block)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::terrain;
+    use crate::worldgen::terrain;
 
     fn count(world: &World, block: Block) -> usize {
         let mut n = 0;

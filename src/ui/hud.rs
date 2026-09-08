@@ -10,10 +10,10 @@
 //! Each slot is an action. The clock and the compass are *held* rather than
 //! pressed, so the hour sweeps while the key is down; everything else fires once.
 
-use crate::blocks::{self, Block};
-use crate::output::Framebuffer;
-use crate::pack::{Pack, BLOCK_DIR};
-use crate::png::Image;
+use crate::assets::blocks::{self, Block};
+use crate::render::output::Framebuffer;
+use crate::assets::pack::{Pack, BLOCK_DIR};
+use crate::codec::png::Image;
 
 const GUI_DIR: &str = "assets/minecraft/textures/gui/sprites/hud/";
 const ITEM_DIR: &str = "assets/minecraft/textures/item/";

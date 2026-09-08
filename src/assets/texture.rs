@@ -4,7 +4,7 @@
 //! texture whose height is a multiple of its width is treated as `n` frames.
 
 use crate::math::{vec3, Vec3};
-use crate::png::Image;
+use crate::codec::png::Image;
 
 /// sRGB byte to linear float. Lighting must be done in linear space.
 fn srgb_to_linear(byte: u8) -> f32 {
