@@ -408,11 +408,10 @@ fn run_splash(
         if input.escape && splash.escape() == Some(splash::Choice::Quit) {
             return Ok(false);
         }
-        if input.click_left {
-            if let Some((mx, my)) = input.mouse {
-                if splash.click(frame, mx, my) == Some(splash::Choice::Play) {
-                    return Ok(true);
-                }
+        if let Some((mx, my)) = input.mouse {
+            splash.hover(frame, mx, my);
+            if input.click_left {
+                splash.click(frame, mx, my);
             }
         }
 
@@ -420,8 +419,53 @@ fn run_splash(
         if !win.present(frame)? {
             return Ok(false);
         }
+        // The choice comes back only once its button has been seen to sink in.
+        match splash.tick() {
+            Some(splash::Choice::Play) => return Ok(true),
+            Some(splash::Choice::Quit) => return Ok(false),
+            None => {}
+        }
     }
     Ok(false)
+}
+
+/// Build the scene and the overlay on a worker thread, spinning on the title
+/// screen until they are ready. It takes about a second — terrain, structures,
+/// the neighbours and 92 textures — and a window that stops answering for a
+/// second looks like a window that has crashed.
+fn load_while_spinning(
+    win: &mut WindowOutput,
+    frame: &mut Framebuffer,
+    splash: &splash::Splash,
+    args: &Args,
+) -> io::Result<Option<(Scene, hud::Hud)>> {
+    let (seed, panorama, time) = (args.seed, args.panorama_sky, args.time);
+    let worker = std::thread::spawn(move || -> io::Result<(Scene, hud::Hud)> {
+        let scene = load_scene(seed, panorama, time)?;
+        let pack = pack::Pack::open(None).map_err(io::Error::other)?;
+        let hud = hud::Hud::load(&pack).map_err(io::Error::other)?;
+        Ok((scene, hud))
+    });
+
+    let mut tick = 0usize;
+    while !worker.is_finished() {
+        if !win.is_open() {
+            break;
+        }
+        let _ = win.poll_input();
+        let (w, h) = win.size();
+        frame.resize(w, h);
+        splash.draw_loading(frame, tick);
+        tick += 1;
+        if !win.present(frame)? {
+            break;
+        }
+    }
+
+    match worker.join() {
+        Ok(result) => result.map(Some),
+        Err(_) => Err(io::Error::other("the scene failed to build")),
+    }
 }
 
 fn run_window(args: &Args) -> io::Result<()> {
@@ -436,11 +480,10 @@ fn run_window(args: &Args) -> io::Result<()> {
         return Ok(());
     }
     win.set_status("cargando la escena...");
-    win.present(&frame)?;
-
-    let mut scene = load_scene(args.seed, args.panorama_sky, args.time)?;
-    // The overlay reads its own sprites out of the same pack the scene uses.
-    let mut hud = hud::Hud::load(&pack).map_err(io::Error::other)?;
+    let Some((mut scene, mut hud)) = load_while_spinning(&mut win, &mut frame, &splash, args)?
+    else {
+        return Ok(());
+    };
     let mut hud_visible = true;
     // The overlay is composited into a copy: the renderer keeps re-using the
     // frame it wrote, and painting a hotbar into it would poison the running

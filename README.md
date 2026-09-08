@@ -36,8 +36,19 @@ recorrido DDA de vóxeles, mapas normales, skybox, y el planificador multihilo.
 
 Al abrir la ventana aparece una pantalla de título —fondo, créditos y dos botones,
 **Jugar** y **Reglas**— dibujada con la misma tipografía del pack y el mismo
-compositor a mano que la interfaz del juego. La escena no se construye hasta que se
-presiona Jugar.
+compositor a mano que la interfaz del juego.
+
+Los botones responden al mouse: el que está bajo el puntero se aclara, y al hacer
+click la cara se hunde un píxel y se oscurece durante siete frames **antes** de que
+la acción ocurra, así el click se ve además de funcionar. Los dos están siempre en el
+mismo sitio: antes subían al abrir las reglas, y un botón que se mueve de debajo del
+puntero es un botón que se falla.
+
+La escena no se construye hasta que se presiona Jugar, y como eso tarda cerca de un
+segundo —terreno, estructuras, las dos islas vecinas y 92 texturas decodificadas—
+se arma en un hilo aparte mientras la ventana sigue dibujando la pantalla de carga
+con un **spinner** de ocho cuadros girando. Una ventana que deja de responder un
+segundo se lee como una ventana que se colgó.
 
 ## Uso
 
@@ -48,7 +59,7 @@ cargo run --release -- --bench 30                # medición de ms/frame
 cargo run --release -- --bench-idle 60           # medición del frame en reposo
 cargo run --release -- --bench-move 60           # medición del frame mientras se arrastra
 cargo run --release -- --check-pack              # verifica la carga del texture pack
-cargo test --release                             # 142 pruebas
+cargo test --release                             # 146 pruebas
 ```
 
 Opciones: `--width W --height H --seed N --threads N --samples N --sky-panorama
