@@ -26,6 +26,12 @@ pub enum Shape {
 
 /// An axis-aligned box inside a voxel, in cell-local `[0, 1]` coordinates.
 type SubBox = ([f32; 3], [f32; 3]);
+
+/// Most boxes a single cell can need: a fence post plus two rails towards each of
+/// its four neighbours. It used to be five, which silently dropped the rails of
+/// the third and fourth neighbour — a fence in a T or a cross was drawn with two
+/// of its arms missing.
+const MAX_SUB_BOXES: usize = 9;
 pub const AIR: BlockId = 0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -217,7 +223,7 @@ impl World {
     }
 
     /// The boxes a non-full block occupies inside its own cell.
-    fn sub_boxes(&self, shape: Shape, voxel: [i32; 3], out: &mut [SubBox; 5]) -> usize {
+    fn sub_boxes(&self, shape: Shape, voxel: [i32; 3], out: &mut [SubBox; MAX_SUB_BOXES]) -> usize {
         match shape {
             Shape::Full => {
                 out[0] = ([0.0; 3], [1.0; 3]);
@@ -271,7 +277,7 @@ impl World {
         t_in: f32,
         t_out: f32,
     ) -> Option<(f32, Face)> {
-        let mut boxes = [([0.0; 3], [0.0; 3]); 5];
+        let mut boxes = [([0.0; 3], [0.0; 3]); MAX_SUB_BOXES];
         let count = self.sub_boxes(shape, voxel, &mut boxes);
         let mut best: Option<(f32, Face)> = None;
         for (lo, hi) in boxes.iter().take(count) {
@@ -501,6 +507,25 @@ mod tests {
         let rail = Ray::new(vec3(4.2, 7.0, 4.5), vec3(0.0, -1.0, 0.0));
         let hit = w.trace(&rail, 100.0, |_| true).expect("the rail should be hit");
         assert!((hit.t - (7.0 - 4.75)).abs() < 1e-2, "hit at {}", hit.t);
+    }
+
+    #[test]
+    fn a_fence_keeps_every_one_of_its_four_arms() {
+        // A post with four neighbours needs nine boxes; the array used to hold
+        // five, so the third and fourth arm were silently dropped and a fence in
+        // a T or a cross was drawn with pieces missing.
+        let mut w = shaped_world(crate::blocks::OAK_FENCE);
+        for (x, z) in [(3, 4), (5, 4), (4, 3), (4, 5)] {
+            w.set(x, 4, z, crate::blocks::OAK_FENCE);
+        }
+        for (dx, dz) in [(-0.3, 0.0), (0.3, 0.0), (0.0, -0.3), (0.0, 0.3)] {
+            let ray = Ray::new(vec3(4.5 + dx, 7.0, 4.5 + dz), vec3(0.0, -1.0, 0.0));
+            let hit = w
+                .trace(&ray, 100.0, |_| true)
+                .unwrap_or_else(|| panic!("no rail towards {dx},{dz}"));
+            // The top rail of that arm, at 0.75 of the cell.
+            assert!((hit.t - (7.0 - 4.75)).abs() < 1e-2, "hit at {}", hit.t);
+        }
     }
 
     #[test]

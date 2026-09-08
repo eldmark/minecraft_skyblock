@@ -412,6 +412,31 @@ fn render_into(
     });
 }
 
+/// Where a ray restarts after passing through something: just outside the cell it
+/// hit, not just past the point where it entered.
+///
+/// Nudging by an epsilon along the direction leaves the ray *inside* the same
+/// voxel, so the next traversal starts in that cell and hits the very same block
+/// again — a glass pane or a leaf would eat all six of its skips against itself
+/// and the ray would give up and return sky. That is what made windows show the
+/// sky instead of the room behind them.
+fn past_voxel(point: Vec3, dir: Vec3, voxel: [i32; 3]) -> Vec3 {
+    let mut exit = f32::MAX;
+    for axis in 0..3 {
+        let d = dir.axis(axis);
+        if d.abs() < 1e-8 {
+            continue;
+        }
+        let bound = if d > 0.0 {
+            voxel[axis] as f32 + 1.0
+        } else {
+            voxel[axis] as f32
+        };
+        exit = exit.min((bound - point.axis(axis)) / d);
+    }
+    point + dir * (exit.max(0.0) + 1e-3)
+}
+
 /// First visible surface along a ray, skipping texels the texture marks as fully
 /// transparent (leaf cutouts) so foliage does not read as solid cubes.
 fn first_visible_hit(scene: &Scene, ray: &Ray) -> Option<(Hit, Vec3)> {
@@ -428,8 +453,8 @@ fn first_visible_hit(scene: &Scene, ray: &Ray) -> Option<(Hit, Vec3)> {
         if alpha >= 0.5 {
             return Some((hit, color));
         }
-        // Step just past this texel and keep going.
-        origin = hit.point + ray.dir * 1e-3;
+        // Out of this cell entirely, and keep going.
+        origin = past_voxel(hit.point, ray.dir, hit.voxel);
     }
     None
 }
@@ -459,7 +484,7 @@ fn sun_visibility(scene: &Scene, point: Vec3, normal: Vec3) -> f32 {
         if transmission < 0.02 {
             return 0.0;
         }
-        origin = hit.point + probe.dir * 1e-3;
+        origin = past_voxel(hit.point, probe.dir, hit.voxel);
     }
     transmission
 }
@@ -820,6 +845,36 @@ mod tests {
     }
 
     #[test]
+    fn a_ray_through_a_cutout_leaves_the_cell_it_skipped() {
+        // The nudge past a transparent texel used to keep the ray inside the same
+        // voxel, so a pane or a leaf ate all six skips against itself and the ray
+        // gave up and returned sky: windows showed the sky instead of the room.
+        let dir = vec3(-1.0, 0.0, 0.0);
+        let point = vec3(116.0, 34.5, 27.5);
+        let out = past_voxel(point, dir, [115, 34, 27]);
+        assert!(out.x < 115.0, "the ray stayed in the cell it skipped: {out:?}");
+
+        // And a diagonal ray leaves through whichever face it reaches first.
+        let dir = vec3(-1.0, 0.3, 0.0).normalized();
+        let out = past_voxel(vec3(116.0, 34.1, 27.5), dir, [115, 34, 27]);
+        assert!(out.x < 115.0 || out.y > 35.0, "{out:?}");
+    }
+
+    #[test]
+    fn a_window_shows_what_is_behind_it_and_not_the_sky() {
+        let Some(scene) = scene() else { return };
+        // Straight at the farm house's window from outside: what comes back must
+        // be the lit room, not the sky the ray used to fall through to.
+        let ray = Ray::new(vec3(126.0, 34.5, 27.0), vec3(-1.0, 0.0, 0.0));
+        let color = trace_color(&scene, &ray);
+        let sky = scene.skybox.sample(ray.dir);
+        assert!(
+            (color - sky).length() > 0.05,
+            "the window returned the sky: {color:?} against {sky:?}"
+        );
+    }
+
+    #[test]
     fn the_idle_image_never_jumps_once_it_has_settled() {
         let Some(mut scene) = scene() else { return };
         let camera = Camera::new(vec3(64.0, 34.0, 32.0), 80.0);
@@ -1034,3 +1089,4 @@ mod tests {
         assert!(frame.pixels.iter().any(|&p| p != frame.pixels[0]));
     }
 }
+

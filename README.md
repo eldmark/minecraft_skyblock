@@ -59,7 +59,7 @@ cargo run --release -- --bench 30                # medición de ms/frame
 cargo run --release -- --bench-idle 60           # medición del frame en reposo
 cargo run --release -- --bench-move 60           # medición del frame mientras se arrastra
 cargo run --release -- --check-pack              # verifica la carga del texture pack
-cargo test --release                             # 146 pruebas
+cargo test --release                             # 149 pruebas
 ```
 
 Opciones: `--width W --height H --seed N --threads N --samples N --sky-panorama
@@ -277,9 +277,12 @@ rayo sin duplicar el recorrido:
 | Click del mouse | no-aire | qué bloque quitar, y contra qué cara poner uno |
 
 Encima del recorrido va un **salto de texels transparentes** (`first_visible_hit`):
-si el téxel golpeado tiene alfa < 0.5 —los huecos de las hojas, el vidrio— el rayo se
-adelanta un épsilon y sigue, hasta seis veces. Sin eso las hojas serían cubos
-sólidos.
+si el téxel golpeado tiene alfa < 0.5 —el interior de un vidrio, los huecos de una
+hoja— el rayo continúa **fuera de esa celda**, hasta seis veces. Adelantarlo solo un
+épsilon lo dejaba dentro del mismo vóxel, así que el siguiente recorrido volvía a
+golpear el mismo bloque: una ventana se gastaba sus seis saltos contra sí misma y el
+rayo terminaba devolviendo cielo. Era el bug que hacía que por las ventanas se viera
+el cielo en vez del cuarto.
 
 ## Cómo se sombrea
 
@@ -457,7 +460,7 @@ Los dos caminos interactivos cuestan bastante menos que un frame completo:
 
 | Camino (900×600, 16 hilos) | ms/frame | píxeles trazados |
 |---|---|---|
-| Frame completo | 29.6 | 100% |
+| Frame completo | 30.9 | 100% |
 | Arrastrando (tablero + interpolación) | **17.2** (58 fps) | 50% |
 | Arrastrando, si el frame pasa de 45 ms | media resolución | 25% |
 | En reposo (refresco selectivo) | **17.7** | 48% |

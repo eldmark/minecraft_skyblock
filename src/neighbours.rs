@@ -388,6 +388,18 @@ fn house(world: &mut World, at: (i32, i32, i32)) {
         world.set(x, floor + 5, cz, OAK_LOG);
     }
 
+    // Furnish it. The glass is clear now, so an empty room means looking through
+    // the window, across the room and straight out of the doorway at the sky —
+    // technically transparent, and it reads as a house with nothing in it.
+    // A bed against the back wall, and a table in the middle.
+    world.set(cx + w - 1, floor, cz - 2, WHITE_WOOL);
+    world.set(cx + w - 1, floor, cz - 1, RED_WOOL);
+    world.set(cx + w - 2, floor, cz - 1, RED_WOOL);
+    world.set(cx + w - 2, floor, cz - 2, WHITE_WOOL);
+    world.set(cx, floor, cz + 1, OAK_FENCE);
+    world.set(cx, floor + 1, cz + 1, OAK_SLAB);
+    world.set(cx - 1, floor, cz + 2, HAY_BLOCK);
+
     // A lantern by the door, so the farm reads at night too.
     world.set(cx - w - 1, floor + 1, cz - 1, GLOWSTONE);
 

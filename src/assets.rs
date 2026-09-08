@@ -26,6 +26,9 @@ pub struct Assets {
     materials: Vec<Material>,
 }
 
+/// What the holes in a leaf texture are filled with: the dark inside of a canopy.
+const LEAF_BACKDROP: Vec3 = vec3(0.020, 0.045, 0.016);
+
 /// Foliage tint. `grass_block_top` and `oak_leaves` ship in grayscale precisely so
 /// the game can tint them per biome; without this the island renders gray.
 const GRASS_TINT: Vec3 = vec3(0.42, 0.75, 0.32);
@@ -201,16 +204,22 @@ impl Assets {
                 Material::diffuse(2.0).with_emission(3.2),
             ),
             (
-                // Ozocraft's glass is 27% opaque frame in a dark brown, and at
-                // this scale that frame is most of what a window shows. The tint
-                // lifts it to a pale grey and the transparency is nearly total,
-                // so a window reads as a window and the room behind it is
-                // actually visible — no lamp needed behind the pane.
+                // No tint: a material's tint also multiplies whatever is seen
+                // *through* it, so brightening the frame with it turned every
+                // window into a white rectangle. The frame is dark and thin and
+                // that is fine; what matters is that the glass is nearly clear in
+                // both directions.
                 blocks::GLASS,
                 "glass",
                 "glass",
                 "glass",
-                Material::refractive(0.96, 1.52, 0.10).with_tint(vec3(3.4, 3.5, 3.6)),
+                // The index is nearly 1 on purpose. A pane in the game is a
+                // sheet; ours is a whole cube of glass, and at 1.52 a ray bends
+                // going in, crosses a block of it, and bends again coming out —
+                // enough displacement (and total internal reflection at grazing
+                // angles) to turn a window into grey mush. At 1.02 the ray goes
+                // essentially straight through and a window is a window.
+                Material::refractive(0.94, 1.02, 0.06),
             ),
             (
                 // The portal reads as thick, smoky crystal rather than as water.
@@ -516,6 +525,17 @@ impl Assets {
             };
             faces[block as usize] = f;
             materials[block as usize] = material;
+        }
+
+        // Foliage is a cutout texture: holes with leaves around them. Traced
+        // against the sky those holes are the void, so a canopy read as a broken
+        // thing rather than as a tree. Compositing each leaf texture over a dark
+        // green closes them and keeps the leaf pattern, which is what a canopy
+        // looks like from outside anyway.
+        for name in ["oak_leaves", "flowering_azalea_leaves"] {
+            if let Some(&i) = by_name.get(name) {
+                textures[i].flatten_onto(LEAF_BACKDROP);
+            }
         }
 
         Ok(Assets {

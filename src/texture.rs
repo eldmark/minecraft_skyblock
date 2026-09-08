@@ -23,6 +23,8 @@ pub struct Texture {
     /// Linear RGB, `width * height * frames` entries, frame-major.
     albedo: Vec<Vec3>,
     alpha: Vec<f32>,
+    /// Kept so a flattened texture can have its normals derived again.
+    normal_strength: f32,
     /// Tangent-space normals derived from the texture's own luminance.
     normal: Vec<Vec3>,
 }
@@ -58,6 +60,7 @@ impl Texture {
             albedo,
             alpha,
             normal,
+            normal_strength,
         }
     }
 
@@ -71,6 +74,29 @@ impl Texture {
 
     pub fn sample(&self, u: f32, v: f32, frame: usize) -> Vec3 {
         self.albedo[self.index(u, v, frame)]
+    }
+
+    /// Composite every texel over `background` and drop the alpha channel.
+    ///
+    /// Cutout textures — leaves, crops — are holes with a picture around them.
+    /// Against the sky that reads as a canopy full of gaps onto the void, which
+    /// at diorama distance looks like damage rather than like foliage. Flattening
+    /// keeps the leaf pattern and puts a dark backdrop behind it, so a tree is a
+    /// solid shape again and still looks like leaves.
+    pub fn flatten_onto(&mut self, background: Vec3) {
+        for (color, alpha) in self.albedo.iter_mut().zip(self.alpha.iter_mut()) {
+            *color = background.lerp(*color, *alpha);
+            *alpha = 1.0;
+        }
+        // The normals were derived from the original luminance; the flattened
+        // texture has different edges, so they are derived again.
+        self.normal = derive_normals(
+            &self.albedo,
+            self.width,
+            self.height,
+            self.frames,
+            self.normal_strength,
+        );
     }
 
     pub fn sample_alpha(&self, u: f32, v: f32, frame: usize) -> f32 {
