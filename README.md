@@ -146,6 +146,57 @@ Las texturas son de **Ozocraft Remix** (32×32) y se incluyen solo las necesaria
 reproducir este trabajo académico; el pack completo (51 MB) sigue fuera del
 repositorio.
 
+### Materiales y parámetros ópticos
+
+Estos son los valores que usa el programa, tomados de `assets/mod.rs` y
+`assets/material.rs`; no son una aproximación visual. El albedo final es la textura
+en luz lineal multiplicada por el tinte indicado. Todas las texturas generan además
+un mapa normal por Sobel; `N` es la intensidad de ese mapa. La emisión es un escalar
+que multiplica el albedo, por eso su color procede de la propia textura y del tinte.
+
+#### Isla principal, templo y dragón
+
+| Material o bloques | Textura / tratamiento | Tinte de albedo | Specular (coef./exp.) | Transp. | Refl. | IOR | Emisión | N |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| Grass | cara superior y lateral distintas; base de tierra | `(0.42, 0.75, 0.32)` | 0.04 / 6 | 0 | 0 | 1.00 | 0 | 2.5 |
+| Dirt | textura de tierra | — | 0.04 / 6 | 0 | 0 | 1.00 | 0 | 2.5 |
+| Stone / cobblestone | roca lisa / adoquín | — | 0.04 / 6 | 0 | 0 | 1.00 | 0 | 3.5 / 4.5 |
+| Sand | arena clara | — | 0.04 / 6 | 0 | 0 | 1.00 | 0 | 2.0 |
+| Oak log | anillos arriba y vetas en los lados | — | 0.04 / 6 | 0 | 0 | 1.00 | 0 | 3.0 |
+| Oak planks / slab / fence | tablones; la geometría cambia, no el material | — | 0.04 / 6 | 0 | 0 | 1.00 | 0 | 2.5 |
+| Oak / flowering leaves | follaje sobre fondo verde oscuro | hojas: `(0.33, 0.62, 0.24)` | 0.04 / 6 | 0 | 0 | 1.00 | 0 | 1.5 |
+| Water | textura animada, reflexión Fresnel y refracción | `(0.62, 0.95, 1.05)` | 0.60 / 64 | 0.88 | 0.30 | 1.33 | 0 | 0.8 |
+| Stone bricks / mossy / cracked | ladrillos y juntas; tres variantes | — | 0.04 / 6 | 0 | 0 | 1.00 | 0 | 4.0 / 4.0 / 4.5 |
+| Quartz / pillar | caras superior, lateral e inferior propias | — | 0.25 / 40 | 0 | 0.06 | 1.00 | 0 | 2.0 / 2.5 |
+| Chiseled quartz | talla distinta por cara | — | 0.28 / 44 | 0 | 0.07 | 1.00 | 0 | 3.0 |
+| Quartz bricks | ladrillo claro | — | 0.22 / 36 | 0 | 0.05 | 1.00 | 0 | 3.0 |
+| Glass | marco texturado y texels transparentes | — | 0.60 / 64 | 0.94 | 0.06 | 1.02 | 0 | 0.8 |
+| Crystal portal | cristal azulado refractante | `(0.55, 0.75, 1.0)` | 0.60 / 64 | 0.72 | 0.20 | 1.45 | 0.9 | 0.8 |
+| Glowstone | textura luminosa; también crea luz puntual | — | 0.04 / 6 | 0 | 0 | 1.00 | 3.2 | 2.0 |
+| Gold / iron / diamond ore | mineral incrustado en piedra | — | 0.35 / 48 · 0.25 / 32 · 0.45 / 64 | 0 | 0.08 / 0 / 0.10 | 1.00 | 0 | 3.0 |
+| Gold / iron / diamond block | metal pulido | dorado / casi blanco / cian | 0.90 / 96 | 0 | 0.55 / 0.45 / 0.35 | 1.00 | 0 | 1.5 |
+| White / red / brown wool | fibra mate del dragón y los animales | — | 0.10 / 12 | 0 | 0 | 1.00 | 0 | 2.5 |
+| Red / black concrete | superficie dura y más lisa que la lana | — | 0.20 / 30 · 0.28 / 42 | 0 | 0.04 / 0.06 | 1.00 | 0 | 1.5 |
+| Obsidian / crying obsidian | roca negra vítrea; variante morada luminosa | — | 0.55 / 72 | 0 | 0.22 | 1.00 | 0 / 0.5 | 3.5 |
+
+#### Islas del Nether y de la granja
+
+| Material o bloques | Textura / tratamiento | Tinte de albedo | Specular (coef./exp.) | Transp. | Refl. | IOR | Emisión | N |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| Netherrack | roca roja rugosa | — | 0.12 / 16 | 0 | 0 | 1.00 | 0.12 | 4.0 |
+| Nether bricks | ladrillos rojos con juntas | — | 0.04 / 6 | 0 | 0 | 1.00 | 0 | 3.0 |
+| Soul sand | arena de almas punteada | — | 0.04 / 6 | 0 | 0 | 1.00 | 0 | 3.5 |
+| Magma | placas oscuras con grietas luminosas | `(1.0, 0.72, 0.45)` | 0.04 / 6 | 0 | 0 | 1.00 | 1.4 | 2.5 |
+| Lava | textura animada; opaca y emisiva | `(1.0, 0.68, 0.34)` | 0.18 / 24 | 0 | 0 | 1.00 | 4.0 | 0 |
+| Nether portal | remolino animado, refractante y emisivo | `(0.86, 0.45, 1.0)` | 0.60 / 64 | 0.55 | 0.18 | 1.25 | 2.2 | 0.8 |
+| Hay block | tapa y vetas laterales distintas | — | 0.04 / 6 | 0 | 0 | 1.00 | 0 | 2.5 |
+| Farmland | tierra húmeda arriba y tierra en los lados | — | 0.04 / 6 | 0 | 0 | 1.00 | 0 | 3.0 |
+| Pumpkin | tapa y franjas laterales distintas | — | 0.04 / 6 | 0 | 0 | 1.00 | 0 | 2.5 |
+
+Los bloques restantes usan el mismo modelo: gravel, moss, emerald block y redstone
+block cambian textura y, cuando corresponde, tinte, reflectividad o emisión. La
+fuente completa y autoritativa de los 48 tipos no vacíos es `src/assets/mod.rs`.
+
 ## Qué implementa
 
 | Elemento | Dónde |
@@ -406,6 +457,66 @@ barandas de cercas y postes colgando al vacío:
 
 ## Rendimiento
 
+### Técnicas utilizadas y por qué son importantes
+
+#### Generación procedural del mundo
+
+El terreno no se carga desde un mapa prefabricado. Se construye a partir de una
+**semilla**, por lo que una misma `--seed` siempre produce el mismo mundo y semillas
+distintas cambian el relieve sin alterar las reglas de la escena.
+
+La forma general de cada isla se obtiene combinando varias octavas de **ruido Perlin
+y fBm**. Las frecuencias bajas producen las masas grandes y suaves; las altas añaden
+irregularidad en los bordes y en la superficie. Ese valor se combina con una
+máscara que disminuye hacia los extremos para formar una isla en vez de un terreno
+infinito. Debajo de la superficie se reduce progresivamente el radio de las capas,
+lo que crea la estalactita flotante.
+
+La generación ocurre por etapas:
+
+1. `terrain.rs` calcula altura, tierra, piedra, arena, río, cascadas, minerales y
+   árboles dentro de una región local de 48×48.
+2. `structures.rs` coloca el templo, la ruina, el gran árbol, el puente y el
+   dragón sin tener que conocer el tamaño final del mundo.
+3. `neighbours.rs` traslada la isla principal a la cuadrícula global, genera las
+   islas del Nether y de la granja con variaciones del mismo ruido y conecta las
+   tres mediante puentes.
+
+Separar terreno, estructuras y composición permite regenerar el mundo sin tocar el
+renderer y garantiza que los elementos importantes aparezcan para cualquier
+semilla. El dragón tampoco es una malla importada: se construye con vóxeles mediante
+tramos y anillos alrededor del templo, y después se agregan cabeza, alas, cresta,
+garganta, ojos y espinas.
+
+#### Optimizaciones del trazado y el sombreado
+
+| Técnica | Cómo funciona | Por qué es importante |
+|---|---|---|
+| DDA 3D | Recorre solamente las celdas que atraviesa el rayo y avanza al siguiente borde con sumas y comparaciones. | Evita probar el rayo contra todos los bloques o convertir el mundo en millones de triángulos. |
+| Caja del mundo y macro-ocupación | Primero recorta el rayo al volumen de la escena y marca regiones 4×4×4 que contienen bloques. | Descarta rápidamente el cielo y evita accesos innecesarios en la mayor parte vacía del mundo. |
+| Sombras condicionadas | Solo lanza un rayo de sombra cuando la normal de la superficie mira hacia la luz. | Una cara orientada en sentido contrario no puede recibir luz directa; omitir ese rayo redujo 92.94 a 18.01 ms/frame. |
+| Luces emisivas agrupadas | Bloques luminosos vecinos se convierten en un solo clúster y solo se evalúan las tres luces cercanas con contribución visible. | Impide lanzar un rayo de sombra por cada bloque de glowstone, lava o portal. |
+| Recursión limitada | Reflexión y refracción terminan a profundidad 4 o cuando su peso baja de 0.015; después del primer rebote se sigue solo la rama dominante. | Controla el crecimiento exponencial de rayos transparentes sin producir una diferencia visual apreciable. |
+| Cielo precalculado | El cielo procedural se hornea en una tabla latitud-longitud y los rayos consultan esa tabla. | Evita recalcular funciones atmosféricas para cada rayo; pasó de 98.86 a 9.84 ms/frame en la prueba aislada. |
+| Paralelismo por tiras dinámicas | Los hilos solicitan tiras de cuatro filas desde una cola atómica en vez de recibir partes fijas de la imagen. | Equilibra el trabajo: una fila de cielo cuesta mucho menos que otra que cruza las tres islas. |
+
+#### Optimizaciones para la interacción
+
+Cuando la cámara se mueve se traza un **tablero de ajedrez**: solo se calcula el
+50% de los píxeles y la otra mitad se interpola con vecinos del mismo frame. Si el
+tiempo supera 45 ms, se usa temporalmente media resolución. Esto mantiene la
+respuesta del mouse sin reutilizar píxeles viejos que producirían una estela.
+
+Cuando la cámara se detiene, cada frame agrega una muestra subpíxel de una secuencia
+de **Halton**. El promedio progresivo suaviza bordes sin pagar muchas muestras de
+golpe. Al converger, los píxeles estáticos se comprueban solo una vez cada ocho
+frames, mientras el agua, los portales y sus reflejos continúan actualizándose.
+
+El ciclo de día y noche comparte un solo reloj para sol, luna, cielo e iluminación.
+La hora avanza continuamente, pero la luz se cuantiza en 240 estados: así no se
+rehace el sombreado de toda la imagen en cada frame y la transición sigue viéndose
+fluida mediante la acumulación temporal.
+
 Escena completa (tres islas, 128×60×64), 900×600, CPU de 8 núcleos / 16 hilos,
 medido con `--bench 20`:
 
@@ -419,6 +530,12 @@ medido con `--bench 20`:
 
 Lineal hasta 8 hilos —los núcleos físicos—; de 8 a 16 el salto es menor porque son
 hilos lógicos sobre los mismos núcleos.
+
+Medición adicional del checkout actual, realizada el **27 de septiembre de 2026**
+en la máquina de desarrollo con `--bench 20 --width 900 --height 600 --threads 16`:
+**44.51 ms/frame, 22.5 fps**. Es una medición del renderer sin ventana ni E/S; los
+fps interactivos dependen de la CPU, el tamaño de la ventana, la escala seleccionada
+y de si la cámara está en movimiento o refinando una imagen quieta.
 
 Optimizaciones aplicadas, cada una medida a 640×520 con 16 hilos sobre la escena de
 una isla (antes de que crecieran las vecinas):

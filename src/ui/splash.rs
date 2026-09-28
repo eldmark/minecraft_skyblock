@@ -30,7 +30,8 @@ pub enum Choice {
 /// The controls, as they are shown on the rules screen. Kept to plain ASCII:
 /// the pack's font sheet has no accented glyphs.
 const RULES: &[(&str, &str)] = &[
-    ("Mouse", "girar la camara (mouselook, siempre activo)"),
+    ("Mouse", "girar la camara"),
+    ("", "(mouselook, siempre activo)"),
     ("Tab", "soltar o retomar el mouselook"),
     ("W A S D", "moverse; en orbita, acercar y girar"),
     ("Espacio / Shift", "subir y bajar en vuelo libre"),
@@ -99,7 +100,12 @@ impl Splash {
     /// Scale of the interface for this window, so text and buttons keep their
     /// share of the frame instead of shrinking into a corner.
     fn scale(&self, frame: &Framebuffer) -> f32 {
-        (frame.width as f32 / 700.0).clamp(1.0, 2.5)
+        // Width alone makes the UI enormous on wide fullscreen displays and
+        // leaves too little vertical room for the rules. Scale against the
+        // limiting dimension so every part of the overlay remains visible.
+        (frame.width as f32 / 700.0)
+            .min(frame.height as f32 / 620.0)
+            .clamp(1.0, 2.5)
     }
 
     fn buttons(&self, frame: &Framebuffer) -> [Button; 2] {
@@ -326,14 +332,20 @@ impl Splash {
         let pad = (12.0 * scale) as i32;
         // The widest key column decides where the description starts, so the two
         // columns line up whatever the window size.
+        // `Font::width` measures the glyph ink, while drawing also advances a
+        // scaled pixel between glyphs. Include that advance here so long rows
+        // such as R and Esc cannot outrun the panel's right edge.
+        let drawn_width = |text: &str| {
+            self.font.width(text, scale) + (text.len() as f32 * scale).round() as i32
+        };
         let key_w = RULES
             .iter()
-            .map(|(key, _)| self.font.width(key, scale))
+            .map(|(key, _)| drawn_width(key))
             .max()
             .unwrap_or(0);
         let text_w = RULES
             .iter()
-            .map(|(_, what)| self.font.width(what, scale))
+            .map(|(_, what)| drawn_width(what))
             .max()
             .unwrap_or(0);
         let width = key_w + text_w + column_gap;
@@ -420,6 +432,15 @@ mod tests {
     }
 
     #[test]
+    fn fullscreen_scale_is_limited_by_the_available_height() {
+        let Some(splash) = splash() else { return };
+        let wide = Framebuffer::new(2048, 1080);
+
+        assert!((splash.scale(&wide) - 1080.0 / 620.0).abs() < f32::EPSILON);
+        assert!(splash.scale(&wide) < 2.0, "fullscreen UI grew too tall");
+    }
+
+    #[test]
     fn a_press_is_shown_before_it_is_acted_on() {
         let Some(mut splash) = splash() else { return };
         let frame = Framebuffer::new(900, 620);
@@ -480,5 +501,3 @@ mod tests {
         );
     }
 }
-
-
