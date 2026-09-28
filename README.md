@@ -3,6 +3,8 @@
 Diorama de tres islas flotantes estilo Minecraft, renderizado con un raytracer escrito
 desde cero en Rust. **Todo el cómputo corre en CPU**: sin OpenGL, sin shaders, sin GPU.
 
+[Enlace al video](https://youtu.be/bf6qNXO35Dc)
+
 ![Vista general](screenshots/overview.png)
 ![La puerta de cristal](screenshots/gate.png)
 ![La cabeza del dragón](screenshots/dragon.png)
